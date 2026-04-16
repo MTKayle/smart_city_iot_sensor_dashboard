@@ -1,0 +1,134 @@
+version: '3.8'
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mqtt-broker
+    ports:
+      - "1883:1883"
+    volumes:
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-logs:/mosquitto/log
+      - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    networks:
+      - smart-city-network
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb-store
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE}
+    volumes:
+      - mongodb-data:/data/db
+    networks:
+      - smart-city-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  oracle-xe:
+    image: gvenzl/oracle-xe:18-slim
+    container_name: oracle-store
+    ports:
+      - "1521:1521"
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD}
+      ORACLE_DATABASE: ${ORACLE_DATABASE}
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+      - ./backend/app/db/sql/oracle_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./backend/app/db/sql/oracle_seed.sql:/docker-entrypoint-initdb.d/02_seed.sql
+    networks:
+      - smart-city-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1G
+          cpus: '1'
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 30s
+      timeout: 30s
+      retries: 10
+      start_period: 120s
+    restart: unless-stopped
+    shm_size: 1gb
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend-consumer
+    ports:
+      - "8000:8000"
+    environment:
+      MQTT_BROKER_HOST: ${MQTT_BROKER_HOST}
+      MQTT_BROKER_PORT: ${MQTT_BROKER_PORT}
+      MONGODB_URI: ${MONGODB_URI}
+      ORACLE_DSN: ${ORACLE_DSN}
+      ORACLE_USER: ${ORACLE_USER}
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD}
+      API_BASE_URL: ${API_BASE_URL}
+    depends_on:
+      mosquitto:
+        condition: service_started
+      mongodb:
+        condition: service_healthy
+      oracle-xe:
+        condition: service_healthy
+    networks:
+      - smart-city-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: ${REACT_APP_API_URL}
+      REACT_APP_WS_URL: ${REACT_APP_WS_URL}
+    depends_on:
+      - backend
+    networks:
+      - smart-city-network
+    restart: unless-stopped
+
+  iot-simulator:
+    build:
+      context: ./iot-simulator
+      dockerfile: Dockerfile
+    container_name: iot-simulator
+    environment:
+      MQTT_BROKER_HOST: ${MQTT_BROKER_HOST}
+      MQTT_BROKER_PORT: ${MQTT_BROKER_PORT}
+      SENSOR_LIST: ${SENSOR_LIST}
+      PUBLISH_INTERVAL: ${PUBLISH_INTERVAL}
+    depends_on:
+      - mosquitto
+    networks:
+      - smart-city-network
+    restart: unless-stopped
+
+networks:
+  smart-city-network:
+    driver: bridge
+
+volumes:
+  mosquitto-data:
+  mosquitto-logs:
+  mongodb-data:
+  oracle-data:

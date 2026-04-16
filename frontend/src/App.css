@@ -1,0 +1,538 @@
+/**
+ * App Component Styles - Cyberpunk Smart City Dashboard
+ * 
+ * Implements futuristic full-screen layout:
+ * - Map underlay
+ * - Glassmorphism UI panel overlay
+ * - Neon green/cyan theme
+ */
+
+/* Root App Container */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background-color: #020617; /* Very dark slate fallback */
+  overflow: hidden;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Map Background Layer */
+.map-background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+}
+
+/* UI Overlay Layer */
+.app-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 10;
+  pointer-events: none; /* Let map clicks pass through */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Glass Panel Base Class - Cyberpunk Vibe */
+.glass-panel {
+  pointer-events: auto; /* Re-enable clicks on panels */
+  background: rgba(2, 6, 23, 0.7); /* Deep dark blue, highly transparent */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 243, 255, 0.25); /* Neon cyan border */
+  box-shadow: 0 0 20px rgba(0, 243, 255, 0.1), inset 0 0 10px rgba(0, 243, 255, 0.05);
+  border-radius: 8px;
+  color: #e0f2fe; /* Light cyan-white text */
+}
+
+/* Sci-fi Scrollbar for Glass Panels */
+.glass-panel::-webkit-scrollbar,
+.chart-section::-webkit-scrollbar,
+.leaderboard-container::-webkit-scrollbar,
+.alerts-container::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.glass-panel::-webkit-scrollbar-track,
+.chart-section::-webkit-scrollbar-track,
+.leaderboard-container::-webkit-scrollbar-track,
+.alerts-container::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+.glass-panel::-webkit-scrollbar-thumb,
+.chart-section::-webkit-scrollbar-thumb,
+.leaderboard-container::-webkit-scrollbar-thumb,
+.alerts-container::-webkit-scrollbar-thumb {
+  background: rgba(0, 243, 255, 0.5);
+  border-radius: 4px;
+}
+
+/* Header */
+.app-header {
+  margin: 16px;
+  padding: 12px 24px;
+  border-top: 2px solid #00f3ff; /* Accent top border */
+}
+
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 100%;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #ffffff;
+  text-shadow: 0 0 10px rgba(0, 243, 255, 0.8), 0 0 20px rgba(0, 243, 255, 0.4);
+}
+
+/* Connection Status Indicator */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-indicator.connected {
+  background-color: #00ff9d; /* Neon Green */
+  box-shadow: 0 0 10px #00ff9d, 0 0 20px #00ff9d;
+}
+
+.status-indicator.connecting {
+  background-color: #facc15; /* Neon Yellow */
+  box-shadow: 0 0 10px #facc15;
+}
+
+.status-indicator.disconnected {
+  background-color: #4b5563;
+  box-shadow: none;
+  animation: none;
+}
+
+.status-indicator.error {
+  background-color: #ff003c; /* Cyberpunk Red */
+  box-shadow: 0 0 10px #ff003c, 0 0 20px #ff003c;
+}
+
+.status-text.neon-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0f2fe;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.1); }
+}
+
+/* Dashboard Grid Layout (Overlay) */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 350px 1fr 350px; /* Fixed sides, fluid center */
+  gap: 16px;
+  padding: 0 16px 16px 16px;
+  height: calc(100vh - 90px); /* Fill remaining height */
+  overflow: hidden;
+}
+
+.grid-section {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Left Section: Charts */
+.chart-section {
+  grid-column: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.no-sensor-selected {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: #94a3b8;
+  font-size: 16px;
+  text-align: center;
+  padding: 20px;
+}
+
+/* Center Section: Transparent click-through area for map */
+.center-section.empty-click-through {
+  grid-column: 2;
+  pointer-events: none; /* Already none from parent, but be explicit */
+  background: transparent;
+}
+
+/* Right Section: Leaderboard + Alerts */
+.right-section {
+  grid-column: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  pointer-events: none; /* Let the section be transparent */
+}
+
+.leaderboard-container {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.alerts-container {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Loading State for initial app load */
+.app-loading {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #020617;
+  color: #00f3ff;
+}
+
+.loading-spinner {
+  width: 60px;
+  height: 60px;
+  border: 3px solid transparent;
+  border-top-color: #00f3ff;
+  border-right-color: #00f3ff;
+  border-radius: 50%;
+  animation: spin 1s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;
+  margin-bottom: 24px;
+  box-shadow: 0 0 15px rgba(0, 243, 255, 0.5);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.app-error {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #020617;
+  color: #ff003c;
+  padding: 24px;
+  text-align: center;
+}
+
+.app-error button {
+  padding: 12px 24px;
+  background-color: transparent;
+  color: #00f3ff;
+  border: 1px solid #00f3ff;
+  border-radius: 4px;
+  font-size: 16px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 10px rgba(0, 243, 255, 0.2);
+}
+
+.app-error button:hover {
+  background-color: rgba(0, 243, 255, 0.1);
+  box-shadow: 0 0 20px rgba(0, 243, 255, 0.5);
+}
+
+/* Responsive Design */
+@media (max-width: 1280px) {
+  .dashboard-grid {
+    grid-template-columns: 300px 1fr 300px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .dashboard-grid {
+    /* Stack panels vertically on left/right or bottom */
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+  }
+  .center-section.empty-click-through { display: none; } /* On smaller screens, map takes the back completely, we overlay on top */
+  .chart-section { grid-column: 1; grid-row: 1; height: 50vh; }
+  .right-section { grid-column: 2; grid-row: 1; height: 50vh; }
+}
+
+@media (max-width: 768px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    overflow-y: auto;
+    pointer-events: auto; /* Need scroll on mobile */
+  }
+  .app-overlay { pointer-events: auto; overflow-y: auto; }
+  .chart-section { grid-row: 1; height: auto; min-height: 400px; }
+  .right-section { grid-row: 2; height: auto; flex-direction: column; gap: 16px; }
+  .leaderboard-container, .alerts-container { height: 350px; }
+}
+
+/* ============================================================================
+   DISTRICT MAP — Tooltip
+   ============================================================================ */
+.district-popup .maplibregl-popup-content {
+  background: rgba(2, 6, 23, 0.88) !important;
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 243, 255, 0.3);
+  border-radius: 10px;
+  padding: 0 !important;
+  box-shadow: 0 0 24px rgba(0, 243, 255, 0.15), 0 8px 32px rgba(0,0,0,0.5);
+  color: #e0f2fe;
+  min-width: 220px;
+}
+.district-popup .maplibregl-popup-tip {
+  border-top-color: rgba(2, 6, 23, 0.88) !important;
+}
+.district-tooltip {
+  padding: 14px 16px;
+}
+.dt-header {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0 0 8px rgba(0, 243, 255, 0.6);
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(0, 243, 255, 0.2);
+  letter-spacing: 0.5px;
+}
+.dt-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+.dt-icon { font-size: 15px; width: 20px; text-align: center; }
+.dt-label { flex: 1; color: #94a3b8; }
+.dt-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 80px;
+  text-align: right;
+}
+.dt-value.ok      { color: #22c55e; }
+.dt-value.warning  { color: #eab308; text-shadow: 0 0 6px rgba(234,179,8,0.4); }
+.dt-value.danger   { color: #ef4444; text-shadow: 0 0 6px rgba(239,68,68,0.5); }
+.dt-footer {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(0, 243, 255, 0.15);
+  font-size: 10px;
+  color: #64748b;
+  text-align: center;
+  letter-spacing: 0.5px;
+}
+
+/* ============================================================================
+   DISTRICT MAP — Center markers & warning badges
+   ============================================================================ */
+.district-marker-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.marker-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.7);
+  transition: all 0.4s ease;
+  animation: marker-pulse 2.5s infinite;
+}
+@keyframes marker-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.25); opacity: 0.7; }
+}
+.warning-badge {
+  position: absolute;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(239, 68, 68, 0.9);
+  border: 1px solid #ff003c;
+  border-radius: 6px;
+  padding: 3px 8px;
+  white-space: nowrap;
+  animation: warning-bounce 1.2s infinite;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.6);
+}
+.badge-text {
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.5px;
+}
+@keyframes warning-bounce {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50%      { transform: translateX(-50%) translateY(-4px); }
+}
+
+/* ============================================================================
+   DISTRICT DETAIL PANEL (click-to-open)
+   ============================================================================ */
+.ddp-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  animation: ddp-fade-in 0.25s ease;
+}
+@keyframes ddp-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.ddp-panel {
+  width: 460px;
+  max-width: 95vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 24px;
+  animation: ddp-slide-up 0.3s ease;
+  border-top: 2px solid #00f3ff;
+}
+@keyframes ddp-slide-up {
+  from { transform: translateY(30px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+.ddp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.ddp-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0 0 12px rgba(0, 243, 255, 0.7);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ddp-close {
+  background: transparent;
+  border: 1px solid rgba(0, 243, 255, 0.3);
+  color: #00f3ff;
+  font-size: 18px;
+  width: 32px; height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ddp-close:hover {
+  background: rgba(0, 243, 255, 0.15);
+  box-shadow: 0 0 12px rgba(0, 243, 255, 0.3);
+}
+.ddp-subtitle {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 18px;
+  letter-spacing: 0.5px;
+}
+.ddp-wards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ddp-ward {
+  background: rgba(0, 243, 255, 0.04);
+  border: 1px solid rgba(0, 243, 255, 0.15);
+  border-radius: 8px;
+  padding: 12px 14px;
+  transition: all 0.2s;
+}
+.ddp-ward:hover {
+  background: rgba(0, 243, 255, 0.08);
+  border-color: rgba(0, 243, 255, 0.3);
+  box-shadow: inset 0 0 8px rgba(0, 243, 255, 0.05);
+}
+.ddp-ward-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #00f3ff;
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+.ddp-sensors {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.ddp-sensor {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.ddp-sensor-label {
+  font-size: 10px;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ddp-sensor-value {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ddp-legend {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 243, 255, 0.15);
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+.ddp-leg-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}

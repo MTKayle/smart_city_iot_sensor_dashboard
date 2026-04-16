@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+</head>
+<body>
+    <h1>Smart City API Test</h1>
+    <button onclick="testHealth()">Test /api/health</button>
+    <button onclick="testSensors()">Test /api/sensors</button>
+    <button onclick="testAlerts()">Test /api/alerts</button>
+    <pre id="output"></pre>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        const output = document.getElementById('output');
+
+        async function testHealth() {
+            output.textContent = 'Testing /api/health...\n';
+            try {
+                const response = await fetch(`${API_URL}/api/health`);
+                const data = await response.json();
+                output.textContent += `SUCCESS: ${JSON.stringify(data, null, 2)}\n`;
+            } catch (error) {
+                output.textContent += `ERROR: ${error.message}\n`;
+                console.error('Health check error:', error);
+            }
+        }
+
+        async function testSensors() {
+            output.textContent = 'Testing /api/sensors...\n';
+            try {
+                const response = await fetch(`${API_URL}/api/sensors`);
+                const data = await response.json();
+                output.textContent += `SUCCESS: Got ${data.length} sensors\n`;
+                output.textContent += JSON.stringify(data.slice(0, 2), null, 2) + '\n...\n';
+            } catch (error) {
+                output.textContent += `ERROR: ${error.message}\n`;
+                console.error('Sensors error:', error);
+            }
+        }
+
+        async function testAlerts() {
+            output.textContent = 'Testing /api/alerts...\n';
+            try {
+                const response = await fetch(`${API_URL}/api/alerts`);
+                const data = await response.json();
+                output.textContent += `SUCCESS: Got ${data.length} alerts\n`;
+                output.textContent += JSON.stringify(data.slice(0, 2), null, 2) + '\n...\n';
+            } catch (error) {
+                output.textContent += `ERROR: ${error.message}\n`;
+                console.error('Alerts error:', error);
+            }
+        }
+
+        // Auto-test on load
+        window.onload = () => {
+            output.textContent = 'Page loaded. Click buttons to test API endpoints.\n\n';
+            output.textContent += 'API URL: ' + API_URL + '\n\n';
+        };
+    </script>
+</body>
+</html>
