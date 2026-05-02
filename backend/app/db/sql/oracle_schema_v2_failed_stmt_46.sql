@@ -1,0 +1,8 @@
+SELECT table_name, num_rows 
+FROM user_tables 
+WHERE table_name IN (
+    'LOCATIONS', 'SENSOR_CLUSTERS', 'SENSOR_REGISTRY', 
+    'SENSOR_CAPABILITIES', 'ALERTS', 'INCIDENTS', 
+    'INCIDENT_ALERTS', 'SENSOR_HEALTH_LOGS', 'TELEMETRY_SUMMARY'
+)
+ORDER BY table_name;

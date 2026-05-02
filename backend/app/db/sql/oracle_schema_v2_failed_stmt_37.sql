@@ -1,0 +1,1 @@
+CREATE INDEX idx_health_sensor_time ON SENSOR_HEALTH_LOGS(SensorID, Timestamp);

@@ -1,0 +1,1 @@
+CREATE INDEX idx_summary_granularity ON TELEMETRY_SUMMARY(Granularity, TimeBucket);

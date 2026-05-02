@@ -1,0 +1,1 @@
+CREATE INDEX idx_capabilities_sensor ON SENSOR_CAPABILITIES(SensorID);

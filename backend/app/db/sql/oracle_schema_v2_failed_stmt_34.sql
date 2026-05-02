@@ -1,0 +1,1 @@
+CREATE INDEX idx_ia_incident ON INCIDENT_ALERTS(IncidentID);

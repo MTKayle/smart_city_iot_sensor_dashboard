@@ -1,0 +1,1 @@
+CREATE INDEX idx_sensors_location ON SENSOR_REGISTRY(LocationID);

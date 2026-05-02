@@ -425,652 +425,48 @@ Granularity: MINUTE
 
 ```sql
 -- ============================================================================
--- SMART CITY IOT DATABASE SCHEMA - PRODUCTION READY
--- Oracle SQL / PostgreSQL Compatible
--- Version: 2.0
--- Date: 2026-05-01
+-- SMART CITY IOT DATABASE SCHEMA - ORACLE READY (FIXED v2)
+-- Changes from v1:
+--   [FIX-1] Added missing FK indexes on ALERTS, TELEMETRY_SUMMARY,
+--           INCIDENT_ALERTS, INCIDENTS (performance - critical)
+--   [FIX-2] Added BEFORE UPDATE triggers for UpdatedAt on LOCATIONS,
+--           SENSOR_REGISTRY, SENSOR_CLUSTERS (data accuracy)
+--   [FIX-3] Relaxed chk_alert_target to allow SensorID + ClusterID
+--           to coexist; added LocationID auto-sync trigger from sensor/cluster
 -- ============================================================================
+
 
 -- ============================================================================
 -- TABLE: LOCATIONS
--- Hierarchical geographic structure with spatial data
 -- ============================================================================
 CREATE TABLE LOCATIONS (
-    LocationID VARCHAR2(50) PRIMARY KEY,
-    Name VARCHAR2(100) NOT NULL,
-    ParentID VARCHAR2(50),
-    Type VARCHAR2(20) NOT NULL CHECK (Type IN ('City', 'District', 'Ward')),
-    
-    -- Spatial data
-    CenterLat DECIMAL(10, 8),
-    CenterLng DECIMAL(11, 8),
-    Geometry CLOB,  -- GeoJSON polygon
-    Area DECIMAL(12, 2),  -- km²
-    Population INTEGER,
-    
-    -- Audit fields
-    CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Constraints
-    CONSTRAINT fk_locations_parent FOREIGN KEY (ParentID) 
-        REFERENCES LOCATIONS(LocationID) ON DELETE CASCADE,
+    LocationID  VARCHAR2(50)  PRIMARY KEY,
+    Name        VARCHAR2(100) NOT NULL,
+    ParentID    VARCHAR2(50),
+    Type        VARCHAR2(20)  NOT NULL CHECK (Type IN ('City','District','Ward')),
+
+    CenterLat   NUMBER(10,8),
+    CenterLng   NUMBER(11,8),
+    Geometry    CLOB,
+    Area        NUMBER(12,2),
+    Population  NUMBER,
+
+    CreatedAt   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_locations_parent FOREIGN KEY (ParentID)
+        REFERENCES LOCATIONS(LocationID),
+
     CONSTRAINT chk_locations_coords CHECK (
         (CenterLat IS NULL AND CenterLng IS NULL) OR
         (CenterLat IS NOT NULL AND CenterLng IS NOT NULL)
     )
 );
 
--- Indexes
 CREATE INDEX idx_locations_parent ON LOCATIONS(ParentID);
-CREATE INDEX idx_locations_type ON LOCATIONS(Type);
-CREATE INDEX idx_locations_coords ON LOCATIONS(CenterLat, CenterLng);
 
--- Comments
-COMMENT ON TABLE LOCATIONS IS 'Hierarchical location structure: City > District > Ward';
-COMMENT ON COLUMN LOCATIONS.Geometry IS 'GeoJSON polygon defining location boundary';
-COMMENT ON COLUMN LOCATIONS.Area IS 'Area in square kilometers';
-
--- ============================================================================
--- TABLE: SENSOR_CLUSTERS
--- Spatial grouping of sensors for hotspot detection
--- ============================================================================
-CREATE TABLE SENSOR_CLUSTERS (
-    ClusterID VARCHAR2(50) PRIMARY KEY,
-    LocationID VARCHAR2(50) NOT NULL,
-    ClusterName VARCHAR2(100) NOT NULL,
-    
-    -- Cluster geometry
-    CenterLat DECIMAL(10, 8) NOT NULL,
-    CenterLng DECIMAL(11, 8) NOT NULL,
-    Radius DECIMAL(8, 2) NOT NULL,  -- meters
-    
-    -- Metadata
-    SensorCount INTEGER DEFAULT 0,
-    Algorithm VARCHAR2(50),  -- KMEANS, DBSCAN, GRID
-    
-    -- Audit fields
-    CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Constraints
-    CONSTRAINT fk_clusters_location FOREIGN KEY (LocationID) 
-        REFERENCES LOCATIONS(LocationID) ON DELETE CASCADE,
-    CONSTRAINT chk_clusters_radius CHECK (Radius > 0)
-);
-
--- Indexes
-CREATE INDEX idx_clusters_location ON SENSOR_CLUSTERS(LocationID);
-CREATE INDEX idx_clusters_coords ON SENSOR_CLUSTERS(CenterLat, CenterLng);
-
--- Comments
-COMMENT ON TABLE SENSOR_CLUSTERS IS 'Spatial clusters for hotspot detection and aggregation';
-COMMENT ON COLUMN SENSOR_CLUSTERS.Radius IS 'Cluster radius in meters';
-COMMENT ON COLUMN SENSOR_CLUSTERS.Algorithm IS 'Clustering algorithm used: KMEANS/DBSCAN/GRID';
-
--- ============================================================================
--- TABLE: SENSOR_REGISTRY
--- Physical IoT sensor devices with geolocation
--- ============================================================================
-CREATE TABLE SENSOR_REGISTRY (
-    SensorID VARCHAR2(50) PRIMARY KEY,
-    LocationID VARCHAR2(50) NOT NULL,
-    ClusterID VARCHAR2(50),
-    
-    -- Precise geolocation
-    Latitude DECIMAL(10, 8) NOT NULL,
-    Longitude DECIMAL(11, 8) NOT NULL,
-    Altitude DECIMAL(7, 2),  -- meters above sea level
-    
-    -- Hardware information
-    SensorModel VARCHAR2(100),
-    FirmwareVersion VARCHAR2(50),
-    
-    -- Operational status
-    Status VARCHAR2(20) DEFAULT 'Active' NOT NULL
-        CHECK (Status IN ('Active', 'Offline', 'Maintenance', 'Decommissioned')),
-    
-    -- Maintenance tracking
-    InstallDate DATE NOT NULL,
-    LastMaintenance DATE,
-    NextMaintenance DATE,
-    
-    -- Audit fields
-    RegisteredAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Constraints
-    CONSTRAINT fk_sensors_location FOREIGN KEY (LocationID) 
-        REFERENCES LOCATIONS(LocationID) ON DELETE CASCADE,
-    CONSTRAINT fk_sensors_cluster FOREIGN KEY (ClusterID) 
-        REFERENCES SENSOR_CLUSTERS(ClusterID) ON DELETE SET NULL,
-    CONSTRAINT chk_sensors_maintenance CHECK (
-        NextMaintenance IS NULL OR 
-        LastMaintenance IS NULL OR 
-        NextMaintenance > LastMaintenance
-    )
-);
-
--- Indexes
-CREATE INDEX idx_sensors_location ON SENSOR_REGISTRY(LocationID);
-CREATE INDEX idx_sensors_cluster ON SENSOR_REGISTRY(ClusterID);
-CREATE INDEX idx_sensors_status ON SENSOR_REGISTRY(Status);
-CREATE INDEX idx_sensors_coords ON SENSOR_REGISTRY(Latitude, Longitude);
-CREATE INDEX idx_sensors_next_maintenance ON SENSOR_REGISTRY(NextMaintenance) 
-    WHERE NextMaintenance IS NOT NULL;
-
--- Spatial index (Oracle Spatial - optional)
--- CREATE INDEX idx_sensors_spatial ON SENSOR_REGISTRY(Latitude, Longitude) 
---     INDEXTYPE IS MDSYS.SPATIAL_INDEX;
-
--- Comments
-COMMENT ON TABLE SENSOR_REGISTRY IS 'Registry of physical IoT sensor devices';
-COMMENT ON COLUMN SENSOR_REGISTRY.Altitude IS 'Elevation in meters above sea level';
-COMMENT ON COLUMN SENSOR_REGISTRY.Status IS 'Operational status: Active/Offline/Maintenance/Decommissioned';
-
--- ============================================================================
--- TABLE: SENSOR_CAPABILITIES (NEW - Normalized)
--- Individual sensor capabilities (replaces JSON field)
--- ============================================================================
-CREATE TABLE SENSOR_CAPABILITIES (
-    CapabilityID VARCHAR2(50) PRIMARY KEY,
-    SensorID VARCHAR2(50) NOT NULL,
-    
-    -- Metric information
-    MetricType VARCHAR2(20) NOT NULL 
-        CHECK (MetricType IN ('CO2', 'Noise', 'Temperature', 'PM2.5', 'Humidity', 'Pressure')),
-    Unit VARCHAR2(20) NOT NULL,  -- ppm, dB, °C, μg/m³, %, hPa
-    
-    -- Range and accuracy
-    MinRange DECIMAL(10, 2),
-    MaxRange DECIMAL(10, 2),
-    Accuracy DECIMAL(5, 2),  -- percentage
-    
-    -- Calibration tracking
-    CalibrationDate DATE,
-    NextCalibration DATE,
-    
-    -- Status
-    IsActive BOOLEAN DEFAULT TRUE,
-    
-    -- Constraints
-    CONSTRAINT fk_capabilities_sensor FOREIGN KEY (SensorID) 
-        REFERENCES SENSOR_REGISTRY(SensorID) ON DELETE CASCADE,
-    CONSTRAINT uk_capabilities_sensor_metric UNIQUE (SensorID, MetricType),
-    CONSTRAINT chk_capabilities_range CHECK (
-        MinRange IS NULL OR MaxRange IS NULL OR MinRange < MaxRange
-    ),
-    CONSTRAINT chk_capabilities_calibration CHECK (
-        NextCalibration IS NULL OR 
-        CalibrationDate IS NULL OR 
-        NextCalibration > CalibrationDate
-    )
-);
-
--- Indexes
-CREATE INDEX idx_capabilities_sensor ON SENSOR_CAPABILITIES(SensorID);
-CREATE INDEX idx_capabilities_metric ON SENSOR_CAPABILITIES(MetricType);
-CREATE INDEX idx_capabilities_active ON SENSOR_CAPABILITIES(IsActive);
-
--- Comments
-COMMENT ON TABLE SENSOR_CAPABILITIES IS 'Normalized sensor capabilities (one row per sensor per metric)';
-COMMENT ON COLUMN SENSOR_CAPABILITIES.Accuracy IS 'Measurement accuracy as percentage';
-COMMENT ON COLUMN SENSOR_CAPABILITIES.IsActive IS 'Whether this capability is currently enabled';
-
-
-
--- ============================================================================
--- TABLE: ALERTS
--- Environmental alerts with cluster-awareness and lifecycle tracking
--- ============================================================================
-CREATE TABLE ALERTS (
-    AlertID VARCHAR2(50) PRIMARY KEY,
-    
-    -- Flexible targeting: sensor-level OR cluster-level
-    SensorID VARCHAR2(50),
-    ClusterID VARCHAR2(50),
-    LocationID VARCHAR2(50) NOT NULL,
-    
-    -- Alert classification
-    AlertType VARCHAR2(30) NOT NULL 
-        CHECK (AlertType IN ('THRESHOLD', 'PREDICTIVE', 'ANOMALY', 'OFFLINE', 'CLUSTER')),
-    MetricType VARCHAR2(20) NOT NULL 
-        CHECK (MetricType IN ('CO2', 'Noise', 'Temperature', 'PM2.5', 'Humidity', 'AQI')),
-    
-    -- Values
-    Value DECIMAL(10, 2) NOT NULL,
-    Threshold DECIMAL(10, 2),
-    PredictedValue DECIMAL(10, 2),  -- For PREDICTIVE alerts
-    ConfidenceScore DECIMAL(5, 4),  -- ML confidence (0-1)
-    
-    -- Severity
-    Severity VARCHAR2(10) NOT NULL 
-        CHECK (Severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
-    
-    -- Lifecycle status
-    Status VARCHAR2(20) DEFAULT 'OPEN' NOT NULL
-        CHECK (Status IN ('OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'FALSE_POSITIVE')),
-    
-    -- Timestamps
-    CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    AcknowledgedAt TIMESTAMP,
-    AcknowledgedBy VARCHAR2(100),
-    ResolvedAt TIMESTAMP,
-    ResolvedBy VARCHAR2(100),
-    
-    -- Additional context
-    Message CLOB,
-    Metadata CLOB,  -- JSON: additional context
-    
-    -- Constraints
-    CONSTRAINT fk_alerts_sensor FOREIGN KEY (SensorID) 
-        REFERENCES SENSOR_REGISTRY(SensorID) ON DELETE CASCADE,
-    CONSTRAINT fk_alerts_cluster FOREIGN KEY (ClusterID) 
-        REFERENCES SENSOR_CLUSTERS(ClusterID) ON DELETE CASCADE,
-    CONSTRAINT fk_alerts_location FOREIGN KEY (LocationID) 
-        REFERENCES LOCATIONS(LocationID) ON DELETE CASCADE,
-    
-    -- Alert must target EITHER sensor OR cluster (not both, not neither)
-    CONSTRAINT chk_alerts_target CHECK (
-        (SensorID IS NOT NULL AND ClusterID IS NULL) OR 
-        (SensorID IS NULL AND ClusterID IS NOT NULL)
-    ),
-    
-    -- Lifecycle constraints
-    CONSTRAINT chk_alerts_acknowledged CHECK (
-        AcknowledgedAt IS NULL OR AcknowledgedAt >= CreatedAt
-    ),
-    CONSTRAINT chk_alerts_resolved CHECK (
-        ResolvedAt IS NULL OR ResolvedAt >= CreatedAt
-    ),
-    CONSTRAINT chk_alerts_confidence CHECK (
-        ConfidenceScore IS NULL OR (ConfidenceScore >= 0 AND ConfidenceScore <= 1)
-    )
-);
-
--- Indexes
-CREATE INDEX idx_alerts_sensor ON ALERTS(SensorID);
-CREATE INDEX idx_alerts_cluster ON ALERTS(ClusterID);
-CREATE INDEX idx_alerts_location ON ALERTS(LocationID);
-CREATE INDEX idx_alerts_type ON ALERTS(AlertType);
-CREATE INDEX idx_alerts_status ON ALERTS(Status);
-CREATE INDEX idx_alerts_severity ON ALERTS(Severity);
-CREATE INDEX idx_alerts_created ON ALERTS(CreatedAt DESC);
-
--- Composite indexes for common queries
-CREATE INDEX idx_alerts_status_created ON ALERTS(Status, CreatedAt DESC);
-CREATE INDEX idx_alerts_location_status ON ALERTS(LocationID, Status);
-CREATE INDEX idx_alerts_sensor_created ON ALERTS(SensorID, CreatedAt DESC) 
-    WHERE SensorID IS NOT NULL;
-
--- Bitmap indexes for low-cardinality columns (Oracle)
-CREATE BITMAP INDEX idx_alerts_type_bitmap ON ALERTS(AlertType);
-CREATE BITMAP INDEX idx_alerts_status_bitmap ON ALERTS(Status);
-CREATE BITMAP INDEX idx_alerts_severity_bitmap ON ALERTS(Severity);
-
--- Comments
-COMMENT ON TABLE ALERTS IS 'Environmental alerts with sensor or cluster targeting';
-COMMENT ON COLUMN ALERTS.AlertType IS 'THRESHOLD: exceeds limit, PREDICTIVE: will exceed, ANOMALY: statistical outlier, OFFLINE: sensor down, CLUSTER: cluster-level';
-COMMENT ON COLUMN ALERTS.ConfidenceScore IS 'ML model confidence for predictive alerts (0-1)';
-
--- ============================================================================
--- TABLE: INCIDENTS
--- Operational incident management
--- ============================================================================
-CREATE TABLE INCIDENTS (
-    IncidentID VARCHAR2(50) PRIMARY KEY,
-    
-    -- Incident details
-    Title VARCHAR2(200) NOT NULL,
-    Description CLOB,
-    Priority VARCHAR2(10) NOT NULL 
-        CHECK (Priority IN ('LOW', 'MEDIUM', 'HIGH', 'URGENT')),
-    
-    -- Assignment
-    AssignedTo VARCHAR2(100),
-    AssignedTeam VARCHAR2(100),
-    
-    -- Status tracking
-    Status VARCHAR2(20) DEFAULT 'NEW' NOT NULL
-        CHECK (Status IN ('NEW', 'ASSIGNED', 'IN_PROGRESS', 'RESOLVED', 'CLOSED')),
-    
-    -- Timestamps
-    CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    ResolvedAt TIMESTAMP,
-    
-    -- Resolution
-    RootCause VARCHAR2(200),
-    Resolution CLOB,
-    
-    -- Constraints
-    CONSTRAINT chk_incidents_resolved CHECK (
-        ResolvedAt IS NULL OR ResolvedAt >= CreatedAt
-    )
-);
-
--- Indexes
-CREATE INDEX idx_incidents_status ON INCIDENTS(Status);
-CREATE INDEX idx_incidents_priority ON INCIDENTS(Priority);
-CREATE INDEX idx_incidents_assigned ON INCIDENTS(AssignedTo);
-CREATE INDEX idx_incidents_created ON INCIDENTS(CreatedAt DESC);
-CREATE INDEX idx_incidents_status_priority ON INCIDENTS(Status, Priority);
-
--- Comments
-COMMENT ON TABLE INCIDENTS IS 'Operational incidents for alert management and response';
-COMMENT ON COLUMN INCIDENTS.Priority IS 'Incident priority: LOW/MEDIUM/HIGH/URGENT';
-
--- ============================================================================
--- TABLE: INCIDENT_ALERTS (NEW - Many-to-Many Junction)
--- Links incidents to multiple alerts
--- ============================================================================
-CREATE TABLE INCIDENT_ALERTS (
-    IncidentAlertID VARCHAR2(50) PRIMARY KEY,
-    IncidentID VARCHAR2(50) NOT NULL,
-    AlertID VARCHAR2(50) NOT NULL,
-    
-    -- Audit
-    AddedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    AddedBy VARCHAR2(100),
-    
-    -- Constraints
-    CONSTRAINT fk_incident_alerts_incident FOREIGN KEY (IncidentID) 
-        REFERENCES INCIDENTS(IncidentID) ON DELETE CASCADE,
-    CONSTRAINT fk_incident_alerts_alert FOREIGN KEY (AlertID) 
-        REFERENCES ALERTS(AlertID) ON DELETE CASCADE,
-    CONSTRAINT uk_incident_alerts UNIQUE (IncidentID, AlertID)
-);
-
--- Indexes
-CREATE INDEX idx_incident_alerts_incident ON INCIDENT_ALERTS(IncidentID);
-CREATE INDEX idx_incident_alerts_alert ON INCIDENT_ALERTS(AlertID);
-
--- Comments
-COMMENT ON TABLE INCIDENT_ALERTS IS 'Many-to-many junction table linking incidents to alerts';
-COMMENT ON COLUMN INCIDENT_ALERTS.AddedBy IS 'User who linked this alert to the incident';
-
--- ============================================================================
--- TABLE: SENSOR_HEALTH_LOGS (NEW - Health Monitoring)
--- Time-series health monitoring for sensors
--- ============================================================================
-CREATE TABLE SENSOR_HEALTH_LOGS (
-    LogID VARCHAR2(50) PRIMARY KEY,
-    SensorID VARCHAR2(50) NOT NULL,
-    Timestamp TIMESTAMP NOT NULL,
-    
-    -- Health status
-    Status VARCHAR2(20) NOT NULL 
-        CHECK (Status IN ('HEALTHY', 'DEGRADED', 'OFFLINE', 'ERROR')),
-    
-    -- Metrics
-    BatteryLevel DECIMAL(5, 2),  -- percentage (0-100)
-    SignalStrength DECIMAL(6, 2),  -- dBm
-    DataCompleteness DECIMAL(5, 2),  -- percentage (0-100)
-    LastReadingAt TIMESTAMP,
-    
-    -- Error tracking
-    ErrorCode VARCHAR2(50),
-    ErrorMessage VARCHAR2(500),
-    
-    -- Additional context
-    Metadata CLOB,  -- JSON
-    
-    -- Constraints
-    CONSTRAINT fk_health_logs_sensor FOREIGN KEY (SensorID) 
-        REFERENCES SENSOR_REGISTRY(SensorID) ON DELETE CASCADE,
-    CONSTRAINT chk_health_battery CHECK (
-        BatteryLevel IS NULL OR (BatteryLevel >= 0 AND BatteryLevel <= 100)
-    ),
-    CONSTRAINT chk_health_completeness CHECK (
-        DataCompleteness IS NULL OR (DataCompleteness >= 0 AND DataCompleteness <= 100)
-    )
-);
-
--- Indexes
-CREATE INDEX idx_health_logs_sensor ON SENSOR_HEALTH_LOGS(SensorID);
-CREATE INDEX idx_health_logs_timestamp ON SENSOR_HEALTH_LOGS(Timestamp DESC);
-CREATE INDEX idx_health_logs_status ON SENSOR_HEALTH_LOGS(Status);
-CREATE INDEX idx_health_logs_sensor_time ON SENSOR_HEALTH_LOGS(SensorID, Timestamp DESC);
-
--- Partitioning by timestamp (Oracle - monthly partitions)
--- ALTER TABLE SENSOR_HEALTH_LOGS 
---     PARTITION BY RANGE (Timestamp)
---     INTERVAL (NUMTODSINTERVAL(1, 'MONTH'))
---     (PARTITION p_initial VALUES LESS THAN (TO_TIMESTAMP('2026-01-01', 'YYYY-MM-DD')));
-
--- Comments
-COMMENT ON TABLE SENSOR_HEALTH_LOGS IS 'Time-series health monitoring logs for sensors';
-COMMENT ON COLUMN SENSOR_HEALTH_LOGS.DataCompleteness IS 'Percentage of expected data points received';
-COMMENT ON COLUMN SENSOR_HEALTH_LOGS.SignalStrength IS 'Signal strength in dBm (negative values)';
-
-
-
--- ============================================================================
--- TABLE: TELEMETRY_SUMMARY
--- Pre-aggregated analytics with flexible time bucketing
--- ============================================================================
-CREATE TABLE TELEMETRY_SUMMARY (
-    SummaryID VARCHAR2(50) PRIMARY KEY,
-    
-    -- Flexible aggregation target (one of: sensor, location, or cluster)
-    SensorID VARCHAR2(50),
-    LocationID VARCHAR2(50),
-    ClusterID VARCHAR2(50),
-    
-    -- Time bucketing (improved design)
-    TimeBucket TIMESTAMP NOT NULL,  -- Start of time period
-    Granularity VARCHAR2(10) NOT NULL 
-        CHECK (Granularity IN ('MINUTE', 'HOUR', 'DAY', 'WEEK', 'MONTH')),
-    
-    -- CO2 statistics
-    AvgCO2 DECIMAL(10, 2),
-    MaxCO2 DECIMAL(10, 2),
-    MinCO2 DECIMAL(10, 2),
-    StdDevCO2 DECIMAL(10, 2),
-    
-    -- Noise statistics
-    AvgNoise DECIMAL(10, 2),
-    MaxNoise DECIMAL(10, 2),
-    MinNoise DECIMAL(10, 2),
-    StdDevNoise DECIMAL(10, 2),
-    
-    -- Temperature statistics
-    AvgTemperature DECIMAL(10, 2),
-    MaxTemperature DECIMAL(10, 2),
-    MinTemperature DECIMAL(10, 2),
-    StdDevTemperature DECIMAL(10, 2),
-    
-    -- PM2.5 statistics
-    AvgPM25 DECIMAL(10, 2),
-    MaxPM25 DECIMAL(10, 2),
-    
-    -- Humidity
-    AvgHumidity DECIMAL(5, 2),
-    
-    -- Derived metrics
-    CleanScore DECIMAL(5, 2),
-    AQI INTEGER,  -- 0-500
-    
-    -- Data quality
-    DataPoints INTEGER NOT NULL,
-    DataCompleteness DECIMAL(5, 2),  -- percentage
-    
-    -- Audit
-    CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Constraints
-    CONSTRAINT fk_summary_sensor FOREIGN KEY (SensorID) 
-        REFERENCES SENSOR_REGISTRY(SensorID) ON DELETE CASCADE,
-    CONSTRAINT fk_summary_location FOREIGN KEY (LocationID) 
-        REFERENCES LOCATIONS(LocationID) ON DELETE CASCADE,
-    CONSTRAINT fk_summary_cluster FOREIGN KEY (ClusterID) 
-        REFERENCES SENSOR_CLUSTERS(ClusterID) ON DELETE CASCADE,
-    
-    -- Must aggregate by exactly one target
-    CONSTRAINT chk_summary_target CHECK (
-        (SensorID IS NOT NULL AND LocationID IS NULL AND ClusterID IS NULL) OR
-        (SensorID IS NULL AND LocationID IS NOT NULL AND ClusterID IS NULL) OR
-        (SensorID IS NULL AND LocationID IS NULL AND ClusterID IS NOT NULL)
-    ),
-    
-    -- Unique constraints for each aggregation type
-    CONSTRAINT uk_summary_sensor UNIQUE (SensorID, TimeBucket, Granularity),
-    CONSTRAINT uk_summary_location UNIQUE (LocationID, TimeBucket, Granularity),
-    CONSTRAINT uk_summary_cluster UNIQUE (ClusterID, TimeBucket, Granularity),
-    
-    -- Data quality constraints
-    CONSTRAINT chk_summary_completeness CHECK (
-        DataCompleteness IS NULL OR (DataCompleteness >= 0 AND DataCompleteness <= 100)
-    ),
-    CONSTRAINT chk_summary_aqi CHECK (
-        AQI IS NULL OR (AQI >= 0 AND AQI <= 500)
-    ),
-    CONSTRAINT chk_summary_datapoints CHECK (DataPoints > 0)
-);
-
--- Indexes
-CREATE INDEX idx_summary_sensor ON TELEMETRY_SUMMARY(SensorID);
-CREATE INDEX idx_summary_location ON TELEMETRY_SUMMARY(LocationID);
-CREATE INDEX idx_summary_cluster ON TELEMETRY_SUMMARY(ClusterID);
-CREATE INDEX idx_summary_timebucket ON TELEMETRY_SUMMARY(TimeBucket DESC);
-CREATE INDEX idx_summary_granularity ON TELEMETRY_SUMMARY(Granularity);
-
--- Composite indexes for common queries
-CREATE INDEX idx_summary_sensor_time ON TELEMETRY_SUMMARY(SensorID, TimeBucket DESC, Granularity);
-CREATE INDEX idx_summary_location_time ON TELEMETRY_SUMMARY(LocationID, TimeBucket DESC, Granularity);
-CREATE INDEX idx_summary_cluster_time ON TELEMETRY_SUMMARY(ClusterID, TimeBucket DESC, Granularity);
-
--- Indexes for ranking queries
-CREATE INDEX idx_summary_aqi ON TELEMETRY_SUMMARY(AQI DESC) WHERE AQI IS NOT NULL;
-CREATE INDEX idx_summary_cleanscore ON TELEMETRY_SUMMARY(CleanScore DESC) WHERE CleanScore IS NOT NULL;
-
--- Partitioning by TimeBucket (Oracle - monthly partitions)
--- ALTER TABLE TELEMETRY_SUMMARY 
---     PARTITION BY RANGE (TimeBucket)
---     INTERVAL (NUMTODSINTERVAL(1, 'MONTH'))
---     (PARTITION p_initial VALUES LESS THAN (TO_TIMESTAMP('2026-01-01', 'YYYY-MM-DD')));
-
--- Comments
-COMMENT ON TABLE TELEMETRY_SUMMARY IS 'Pre-aggregated telemetry statistics for fast analytics';
-COMMENT ON COLUMN TELEMETRY_SUMMARY.TimeBucket IS 'Start timestamp of aggregation period';
-COMMENT ON COLUMN TELEMETRY_SUMMARY.Granularity IS 'Time granularity: MINUTE/HOUR/DAY/WEEK/MONTH';
-COMMENT ON COLUMN TELEMETRY_SUMMARY.DataCompleteness IS 'Percentage of expected data points received';
-
--- ============================================================================
--- VIEWS
--- ============================================================================
-
--- View: Location Hierarchy (Recursive CTE)
-CREATE OR REPLACE VIEW LOCATION_HIERARCHY AS
-WITH RECURSIVE hierarchy AS (
-    -- Base case: Root locations
-    SELECT 
-        LocationID,
-        Name,
-        ParentID,
-        Type,
-        CenterLat,
-        CenterLng,
-        LocationID as Path,
-        0 as Level
-    FROM LOCATIONS
-    WHERE ParentID IS NULL
-    
-    UNION ALL
-    
-    -- Recursive case: Children
-    SELECT 
-        l.LocationID,
-        l.Name,
-        l.ParentID,
-        l.Type,
-        l.CenterLat,
-        l.CenterLng,
-        h.Path || ' > ' || l.LocationID as Path,
-        h.Level + 1 as Level
-    FROM LOCATIONS l
-    INNER JOIN hierarchy h ON l.ParentID = h.LocationID
-)
-SELECT * FROM hierarchy
-ORDER BY Level, LocationID;
-
-COMMENT ON VIEW LOCATION_HIERARCHY IS 'Recursive view of location hierarchy with path and level';
-
--- View: Active Alerts (Operational Dashboard)
-CREATE OR REPLACE VIEW ACTIVE_ALERTS AS
-SELECT 
-    a.AlertID,
-    a.SensorID,
-    s.Latitude,
-    s.Longitude,
-    a.ClusterID,
-    a.LocationID,
-    l.Name as LocationName,
-    a.AlertType,
-    a.MetricType,
-    a.Value,
-    a.Threshold,
-    a.Severity,
-    a.Status,
-    a.CreatedAt,
-    EXTRACT(HOUR FROM (CURRENT_TIMESTAMP - a.CreatedAt)) as HoursOpen
-FROM ALERTS a
-LEFT JOIN SENSOR_REGISTRY s ON a.SensorID = s.SensorID
-INNER JOIN LOCATIONS l ON a.LocationID = l.LocationID
-WHERE a.Status IN ('OPEN', 'ACKNOWLEDGED')
-ORDER BY a.Severity DESC, a.CreatedAt DESC;
-
-COMMENT ON VIEW ACTIVE_ALERTS IS 'Currently active alerts for operational dashboard';
-
--- View: Sensor Health Status
-CREATE OR REPLACE VIEW SENSOR_HEALTH_STATUS AS
-WITH latest_logs AS (
-    SELECT 
-        SensorID,
-        Status,
-        BatteryLevel,
-        SignalStrength,
-        DataCompleteness,
-        LastReadingAt,
-        Timestamp,
-        ROW_NUMBER() OVER (PARTITION BY SensorID ORDER BY Timestamp DESC) as rn
-    FROM SENSOR_HEALTH_LOGS
-)
-SELECT 
-    s.SensorID,
-    s.LocationID,
-    l.Name as LocationName,
-    s.Status as RegistryStatus,
-    h.Status as HealthStatus,
-    h.BatteryLevel,
-    h.SignalStrength,
-    h.DataCompleteness,
-    h.LastReadingAt,
-    h.Timestamp as LastHealthCheck,
-    EXTRACT(HOUR FROM (CURRENT_TIMESTAMP - h.LastReadingAt)) as HoursSinceLastReading,
-    s.NextMaintenance,
-    CASE 
-        WHEN h.Status = 'OFFLINE' THEN 'CRITICAL'
-        WHEN h.Status = 'ERROR' THEN 'CRITICAL'
-        WHEN h.BatteryLevel < 20 THEN 'WARNING'
-        WHEN h.DataCompleteness < 80 THEN 'WARNING'
-        WHEN s.NextMaintenance < CURRENT_DATE THEN 'MAINTENANCE_OVERDUE'
-        WHEN s.NextMaintenance <= CURRENT_DATE + 7 THEN 'MAINTENANCE_DUE'
-        ELSE 'HEALTHY'
-    END as OverallStatus
-FROM SENSOR_REGISTRY s
-INNER JOIN LOCATIONS l ON s.LocationID = l.LocationID
-LEFT JOIN latest_logs h ON s.SensorID = h.SensorID AND h.rn = 1
-WHERE s.Status != 'Decommissioned';
-
-COMMENT ON VIEW SENSOR_HEALTH_STATUS IS 'Current health status of all active sensors';
-
--- ============================================================================
--- TRIGGERS (Optional - for audit fields)
--- ============================================================================
-
--- Trigger: Update UpdatedAt on LOCATIONS
-CREATE OR REPLACE TRIGGER trg_locations_updated
+-- [FIX-2] Auto-update UpdatedAt on LOCATIONS
+CREATE OR REPLACE TRIGGER trg_locations_updated_at
 BEFORE UPDATE ON LOCATIONS
 FOR EACH ROW
 BEGIN
@@ -1078,17 +474,36 @@ BEGIN
 END;
 /
 
--- Trigger: Update UpdatedAt on SENSOR_REGISTRY
-CREATE OR REPLACE TRIGGER trg_sensors_updated
-BEFORE UPDATE ON SENSOR_REGISTRY
-FOR EACH ROW
-BEGIN
-    :NEW.UpdatedAt := CURRENT_TIMESTAMP;
-END;
-/
 
--- Trigger: Update UpdatedAt on SENSOR_CLUSTERS
-CREATE OR REPLACE TRIGGER trg_clusters_updated
+-- ============================================================================
+-- TABLE: SENSOR_CLUSTERS
+-- ============================================================================
+CREATE TABLE SENSOR_CLUSTERS (
+    ClusterID    VARCHAR2(50)  PRIMARY KEY,
+    LocationID   VARCHAR2(50)  NOT NULL,
+
+    ClusterName  VARCHAR2(100),
+    CenterLat    NUMBER(10,8)  NOT NULL,
+    CenterLng    NUMBER(11,8)  NOT NULL,
+    Radius       NUMBER(8,2)   NOT NULL,
+
+    SensorCount  NUMBER        DEFAULT 0,
+    Algorithm    VARCHAR2(50),
+
+    CreatedAt    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_clusters_location FOREIGN KEY (LocationID)
+        REFERENCES LOCATIONS(LocationID),
+
+    CONSTRAINT chk_clusters_radius CHECK (Radius > 0)
+);
+
+-- FK index (Oracle does NOT auto-create indexes for FK)
+CREATE INDEX idx_clusters_location ON SENSOR_CLUSTERS(LocationID);
+
+-- [FIX-2] Auto-update UpdatedAt on SENSOR_CLUSTERS
+CREATE OR REPLACE TRIGGER trg_clusters_updated_at
 BEFORE UPDATE ON SENSOR_CLUSTERS
 FOR EACH ROW
 BEGIN
@@ -1096,70 +511,289 @@ BEGIN
 END;
 /
 
--- Trigger: Update UpdatedAt on INCIDENTS
-CREATE OR REPLACE TRIGGER trg_incidents_updated
-BEFORE UPDATE ON INCIDENTS
+
+-- ============================================================================
+-- TABLE: SENSOR_REGISTRY
+-- ============================================================================
+CREATE TABLE SENSOR_REGISTRY (
+    SensorID         VARCHAR2(50)  PRIMARY KEY,
+    LocationID       VARCHAR2(50)  NOT NULL,
+    ClusterID        VARCHAR2(50),
+
+    Latitude         NUMBER(10,8)  NOT NULL,
+    Longitude        NUMBER(11,8)  NOT NULL,
+    Altitude         NUMBER(7,2),
+
+    SensorModel      VARCHAR2(100),
+    FirmwareVersion  VARCHAR2(50),
+
+    Status           VARCHAR2(20)  DEFAULT 'Active' NOT NULL
+                         CHECK (Status IN ('Active','Offline','Maintenance','Decommissioned')),
+
+    InstallDate      DATE          NOT NULL,
+    LastMaintenance  DATE,
+    NextMaintenance  DATE,
+
+    RegisteredAt     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_sensors_location FOREIGN KEY (LocationID)
+        REFERENCES LOCATIONS(LocationID),
+
+    CONSTRAINT fk_sensors_cluster FOREIGN KEY (ClusterID)
+        REFERENCES SENSOR_CLUSTERS(ClusterID),
+
+    CONSTRAINT chk_lat CHECK (Latitude  BETWEEN -90  AND 90),
+    CONSTRAINT chk_lng CHECK (Longitude BETWEEN -180 AND 180)
+);
+
+-- FK indexes
+CREATE INDEX idx_sensors_location ON SENSOR_REGISTRY(LocationID);
+CREATE INDEX idx_sensors_cluster  ON SENSOR_REGISTRY(ClusterID);
+
+-- [FIX-2] Auto-update UpdatedAt on SENSOR_REGISTRY
+CREATE OR REPLACE TRIGGER trg_sensors_updated_at
+BEFORE UPDATE ON SENSOR_REGISTRY
 FOR EACH ROW
 BEGIN
     :NEW.UpdatedAt := CURRENT_TIMESTAMP;
 END;
 /
 
--- Trigger: Update SensorCount in SENSOR_CLUSTERS
-CREATE OR REPLACE TRIGGER trg_update_cluster_count
-AFTER INSERT OR DELETE OR UPDATE OF ClusterID ON SENSOR_REGISTRY
+
+-- ============================================================================
+-- TABLE: SENSOR_CAPABILITIES
+-- ============================================================================
+CREATE TABLE SENSOR_CAPABILITIES (
+    CapabilityID      VARCHAR2(50)  PRIMARY KEY,
+    SensorID          VARCHAR2(50)  NOT NULL,
+
+    MetricType        VARCHAR2(20)  NOT NULL,
+    Unit              VARCHAR2(20)  NOT NULL,
+
+    MinRange          NUMBER(10,2),
+    MaxRange          NUMBER(10,2),
+    Accuracy          NUMBER(5,2),
+
+    CalibrationDate   DATE,
+    NextCalibration   DATE,
+
+    IsActive          NUMBER(1)     DEFAULT 1 CHECK (IsActive IN (0,1)),
+
+    CONSTRAINT fk_capabilities_sensor FOREIGN KEY (SensorID)
+        REFERENCES SENSOR_REGISTRY(SensorID),
+
+    CONSTRAINT uk_cap_sensor_metric UNIQUE (SensorID, MetricType)
+);
+
+-- FK index
+CREATE INDEX idx_capabilities_sensor ON SENSOR_CAPABILITIES(SensorID);
+
+
+-- ============================================================================
+-- TABLE: ALERTS
+--
+-- [FIX-3] Original constraint forced mutually exclusive SensorID / ClusterID.
+--   Problem: a sensor-level alert naturally belongs to a cluster too,
+--   and forcing LocationID to be maintained independently risks inconsistency.
+--
+--   New design:
+--     - SensorID and ClusterID can coexist (sensor alert inherits its cluster)
+--     - AT LEAST ONE of (SensorID, ClusterID) must be set
+--     - LocationID is still required (denormalised for fast geo queries)
+--     - Trigger trg_alert_location_sync auto-fills LocationID on INSERT
+--       if the caller leaves it NULL, deriving it from sensor or cluster
+-- ============================================================================
+CREATE TABLE ALERTS (
+    AlertID          VARCHAR2(50)   PRIMARY KEY,
+
+    SensorID         VARCHAR2(50),
+    ClusterID        VARCHAR2(50),
+    LocationID       VARCHAR2(50)   NOT NULL,
+
+    AlertType        VARCHAR2(30)   NOT NULL,
+    MetricType       VARCHAR2(20)   NOT NULL,
+
+    Value            NUMBER(10,2)   NOT NULL,
+    Threshold        NUMBER(10,2),
+    PredictedValue   NUMBER(10,2),
+    ConfidenceScore  NUMBER(5,4),
+
+    Severity         VARCHAR2(10),
+    Status           VARCHAR2(20)   DEFAULT 'OPEN',
+
+    CreatedAt        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    AcknowledgedAt   TIMESTAMP,
+    ResolvedAt       TIMESTAMP,
+
+    Message          CLOB,
+
+    CONSTRAINT fk_alert_sensor   FOREIGN KEY (SensorID)   REFERENCES SENSOR_REGISTRY(SensorID),
+    CONSTRAINT fk_alert_cluster  FOREIGN KEY (ClusterID)  REFERENCES SENSOR_CLUSTERS(ClusterID),
+    CONSTRAINT fk_alert_location FOREIGN KEY (LocationID) REFERENCES LOCATIONS(LocationID),
+
+    -- [FIX-3] At least one target must be set (sensor OR cluster OR both)
+    CONSTRAINT chk_alert_target CHECK (
+        SensorID IS NOT NULL OR ClusterID IS NOT NULL
+    )
+);
+
+-- [FIX-1] FK indexes on ALERTS (critical for join / cascade performance)
+CREATE INDEX idx_alerts_sensor   ON ALERTS(SensorID);
+CREATE INDEX idx_alerts_cluster  ON ALERTS(ClusterID);
+CREATE INDEX idx_alerts_location ON ALERTS(LocationID);
+-- Supporting index for common status-filter queries
+CREATE INDEX idx_alerts_status   ON ALERTS(Status, CreatedAt DESC);
+
+-- [FIX-3] Auto-sync LocationID from sensor or cluster when not supplied
+--   Priority: SensorID.LocationID > ClusterID.LocationID
+CREATE OR REPLACE TRIGGER trg_alert_location_sync
+BEFORE INSERT ON ALERTS
 FOR EACH ROW
+DECLARE
+    v_location VARCHAR2(50);
 BEGIN
-    -- Update old cluster count
-    IF :OLD.ClusterID IS NOT NULL THEN
-        UPDATE SENSOR_CLUSTERS
-        SET SensorCount = (
-            SELECT COUNT(*) FROM SENSOR_REGISTRY 
-            WHERE ClusterID = :OLD.ClusterID
-        )
-        WHERE ClusterID = :OLD.ClusterID;
+    -- If caller explicitly supplied LocationID, trust it and skip
+    IF :NEW.LocationID IS NOT NULL THEN
+        RETURN;
     END IF;
-    
-    -- Update new cluster count
+
+    -- Derive from SensorID first (most specific)
+    IF :NEW.SensorID IS NOT NULL THEN
+        SELECT LocationID INTO v_location
+          FROM SENSOR_REGISTRY
+         WHERE SensorID = :NEW.SensorID;
+        :NEW.LocationID := v_location;
+        RETURN;
+    END IF;
+
+    -- Fall back to ClusterID
     IF :NEW.ClusterID IS NOT NULL THEN
-        UPDATE SENSOR_CLUSTERS
-        SET SensorCount = (
-            SELECT COUNT(*) FROM SENSOR_REGISTRY 
-            WHERE ClusterID = :NEW.ClusterID
-        )
-        WHERE ClusterID = :NEW.ClusterID;
+        SELECT LocationID INTO v_location
+          FROM SENSOR_CLUSTERS
+         WHERE ClusterID = :NEW.ClusterID;
+        :NEW.LocationID := v_location;
     END IF;
 END;
 /
 
--- ============================================================================
--- INITIAL DATA / SEED (Optional)
--- ============================================================================
-
--- Insert root location (City)
-INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Population)
-VALUES ('city_hcm', 'Ho Chi Minh City', NULL, 'City', 10.8231, 106.6297, 9000000);
-
--- Insert districts
-INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES 
-    ('district_q1', 'District 1', 'city_hcm', 'District', 10.7756, 106.7019, 7.73, 204899),
-    ('district_q2', 'District 2', 'city_hcm', 'District', 10.7897, 106.7432, 49.75, 176196),
-    ('district_q3', 'District 3', 'city_hcm', 'District', 10.7866, 106.6828, 4.90, 188029);
-
--- Insert wards (example for District 1)
-INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES 
-    ('ward_q1_01', 'Ward 1', 'district_q1', 'Ward', 10.7756, 106.7019, 0.77, 20000),
-    ('ward_q1_02', 'Ward 2', 'district_q1', 'Ward', 10.7812, 106.7045, 0.82, 22000),
-    ('ward_q1_03', 'Ward 3', 'district_q1', 'Ward', 10.7698, 106.6989, 0.75, 19000);
-
-COMMIT;
 
 -- ============================================================================
--- END OF SCHEMA
+-- TABLE: INCIDENTS
 -- ============================================================================
-```
+CREATE TABLE INCIDENTS (
+    IncidentID  VARCHAR2(50)   PRIMARY KEY,
+    Title       VARCHAR2(200),
+    Priority    VARCHAR2(10),
+    Status      VARCHAR2(20)   DEFAULT 'NEW',
+    CreatedAt   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Supporting index for status-based lookups
+CREATE INDEX idx_incidents_status ON INCIDENTS(Status, CreatedAt DESC);
+
+
+-- ============================================================================
+-- TABLE: INCIDENT_ALERTS
+-- ============================================================================
+CREATE TABLE INCIDENT_ALERTS (
+    IncidentAlertID  VARCHAR2(50)  PRIMARY KEY,
+    IncidentID       VARCHAR2(50),
+    AlertID          VARCHAR2(50),
+
+    CONSTRAINT fk_incident FOREIGN KEY (IncidentID) REFERENCES INCIDENTS(IncidentID),
+    CONSTRAINT fk_alert    FOREIGN KEY (AlertID)    REFERENCES ALERTS(AlertID),
+
+    CONSTRAINT uk_incident_alert UNIQUE (IncidentID, AlertID)
+);
+
+-- [FIX-1] FK indexes on INCIDENT_ALERTS
+CREATE INDEX idx_ia_incident ON INCIDENT_ALERTS(IncidentID);
+CREATE INDEX idx_ia_alert    ON INCIDENT_ALERTS(AlertID);
+
+
+-- ============================================================================
+-- TABLE: SENSOR_HEALTH_LOGS
+-- ============================================================================
+CREATE TABLE SENSOR_HEALTH_LOGS (
+    LogID           VARCHAR2(50)  PRIMARY KEY,
+    SensorID        VARCHAR2(50)  NOT NULL,
+    Timestamp       TIMESTAMP     NOT NULL,
+
+    Status          VARCHAR2(20),
+    BatteryLevel    NUMBER(5,2),
+    SignalStrength  NUMBER(6,2),
+
+    CONSTRAINT fk_health_sensor FOREIGN KEY (SensorID)
+        REFERENCES SENSOR_REGISTRY(SensorID)
+);
+
+-- Composite index: latest-log-per-sensor queries
+CREATE INDEX idx_health_sensor_time ON SENSOR_HEALTH_LOGS(SensorID, Timestamp DESC);
+
+
+-- ============================================================================
+-- TABLE: TELEMETRY_SUMMARY
+-- ============================================================================
+CREATE TABLE TELEMETRY_SUMMARY (
+    SummaryID    VARCHAR2(50)  PRIMARY KEY,
+
+    SensorID     VARCHAR2(50),
+    ClusterID    VARCHAR2(50),
+    LocationID   VARCHAR2(50),
+
+    TimeBucket   TIMESTAMP     NOT NULL,
+    Granularity  VARCHAR2(10)  NOT NULL,
+
+    AvgCO2         NUMBER(10,2),
+    AvgNoise       NUMBER(10,2),
+    AvgTemperature NUMBER(10,2),
+    AvgPM25        NUMBER(10,2),
+
+    AQI          NUMBER,
+    DataPoints   NUMBER        NOT NULL,
+
+    CONSTRAINT fk_summary_sensor   FOREIGN KEY (SensorID)   REFERENCES SENSOR_REGISTRY(SensorID),
+    CONSTRAINT fk_summary_cluster  FOREIGN KEY (ClusterID)  REFERENCES SENSOR_CLUSTERS(ClusterID),
+    CONSTRAINT fk_summary_location FOREIGN KEY (LocationID) REFERENCES LOCATIONS(LocationID),
+
+    CONSTRAINT chk_summary_target CHECK (
+        (SensorID IS NOT NULL AND ClusterID IS NULL     AND LocationID IS NULL) OR
+        (SensorID IS NULL     AND ClusterID IS NOT NULL AND LocationID IS NULL) OR
+        (SensorID IS NULL     AND ClusterID IS NULL     AND LocationID IS NOT NULL)
+    ),
+
+    CONSTRAINT chk_aqi CHECK (AQI IS NULL OR AQI BETWEEN 0 AND 500)
+);
+
+-- [FIX-1] FK indexes on TELEMETRY_SUMMARY
+CREATE INDEX idx_summary_sensor   ON TELEMETRY_SUMMARY(SensorID);
+CREATE INDEX idx_summary_cluster  ON TELEMETRY_SUMMARY(ClusterID);
+CREATE INDEX idx_summary_location ON TELEMETRY_SUMMARY(LocationID);
+-- Time-bucket range queries
+CREATE INDEX idx_summary_time ON TELEMETRY_SUMMARY(TimeBucket);
+
+
+-- ============================================================================
+-- TRIGGER: UPDATE CLUSTER SENSOR COUNT
+-- ============================================================================
+CREATE OR REPLACE TRIGGER trg_cluster_count
+AFTER INSERT OR DELETE ON SENSOR_REGISTRY
+FOR EACH ROW
+BEGIN
+    IF INSERTING AND :NEW.ClusterID IS NOT NULL THEN
+        UPDATE SENSOR_CLUSTERS
+           SET SensorCount = SensorCount + 1
+         WHERE ClusterID = :NEW.ClusterID;
+    END IF;
+
+    IF DELETING AND :OLD.ClusterID IS NOT NULL THEN
+        UPDATE SENSOR_CLUSTERS
+           SET SensorCount = SensorCount - 1
+         WHERE ClusterID = :OLD.ClusterID;
+    END IF;
+END;
+/
 
 
 

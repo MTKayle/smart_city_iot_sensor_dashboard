@@ -15,15 +15,15 @@ from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, date
 import oracledb
 
-from app.models import Location, Sensor, Alert
+from app.models import Location, SensorRegistry, Alert
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Oracle configuration
-ORACLE_USER = os.getenv("ORACLE_USER", "system")
-ORACLE_PASSWORD = os.getenv("ORACLE_PASSWORD", "OraclePass123")
+ORACLE_USER = os.getenv("ORACLE_USER", "SMARTCITY")
+ORACLE_PASSWORD = os.getenv("ORACLE_PASSWORD", "SmartCity2026!")
 ORACLE_DSN = os.getenv("ORACLE_DSN", "oracle-xe:1521/XEPDB1")
 
 # Retry configuration
@@ -54,10 +54,9 @@ class OracleClient:
         global _schema_initialized
         self._pool: Optional[oracledb.ConnectionPool] = None
         self._connect()
-        # Only initialize schema once globally (not per instance)
-        if not _schema_initialized:
-            self._initialize_schema()
-            _schema_initialized = True
+        # Schema initialization is now handled by startup.sh
+        # which uses the v2 PL/SQL-aware parser
+        _schema_initialized = True
     
     def _connect(self):
         """
@@ -332,7 +331,7 @@ class OracleClient:
             return []
 
     
-    def insert_sensor(self, sensor: Sensor) -> bool:
+    def insert_sensor(self, sensor: SensorRegistry) -> bool:
         """
         Insert sensor record into SENSOR_REGISTRY table.
         

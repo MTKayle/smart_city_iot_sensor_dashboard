@@ -1,0 +1,1 @@
+CREATE INDEX idx_summary_cluster  ON TELEMETRY_SUMMARY(ClusterID);

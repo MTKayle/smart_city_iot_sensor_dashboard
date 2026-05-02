@@ -1,0 +1,1 @@
+CREATE INDEX idx_locations_type ON LOCATIONS(Type);
