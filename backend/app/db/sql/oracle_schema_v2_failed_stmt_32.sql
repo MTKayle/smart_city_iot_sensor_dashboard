@@ -1,0 +1,1 @@
+CREATE INDEX idx_incidents_status ON INCIDENTS(Status, CreatedAt);

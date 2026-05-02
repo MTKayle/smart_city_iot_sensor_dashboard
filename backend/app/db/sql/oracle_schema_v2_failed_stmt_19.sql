@@ -1,0 +1,1 @@
+CREATE INDEX idx_sensors_cluster  ON SENSOR_REGISTRY(ClusterID);

@@ -1,0 +1,1 @@
+CREATE INDEX idx_alerts_sensor   ON ALERTS(SensorID);

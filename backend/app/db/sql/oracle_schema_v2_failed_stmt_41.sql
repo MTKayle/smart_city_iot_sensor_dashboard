@@ -1,0 +1,1 @@
+CREATE INDEX idx_summary_location ON TELEMETRY_SUMMARY(LocationID);

@@ -1,0 +1,1 @@
+CREATE INDEX idx_alerts_location ON ALERTS(LocationID);

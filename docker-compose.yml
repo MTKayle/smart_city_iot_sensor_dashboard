@@ -44,8 +44,6 @@ services:
       ORACLE_DATABASE: ${ORACLE_DATABASE}
     volumes:
       - oracle-data:/opt/oracle/oradata
-      - ./backend/app/db/sql/oracle_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
-      - ./backend/app/db/sql/oracle_seed.sql:/docker-entrypoint-initdb.d/02_seed.sql
     networks:
       - smart-city-network
     deploy:
@@ -60,8 +58,8 @@ services:
       test: ["CMD", "healthcheck.sh"]
       interval: 30s
       timeout: 30s
-      retries: 10
-      start_period: 120s
+      retries: 20
+      start_period: 600s
     restart: unless-stopped
     shm_size: 1gb
 
@@ -79,6 +77,8 @@ services:
       ORACLE_DSN: ${ORACLE_DSN}
       ORACLE_USER: ${ORACLE_USER}
       ORACLE_PASSWORD: ${ORACLE_PASSWORD}
+      ORACLE_ADMIN_USER: ${ORACLE_ADMIN_USER}
+      ORACLE_ADMIN_PASSWORD: ${ORACLE_ADMIN_PASSWORD}
       API_BASE_URL: ${API_BASE_URL}
     depends_on:
       mosquitto:

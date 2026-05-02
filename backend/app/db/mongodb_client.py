@@ -11,10 +11,10 @@ import os
 import sys
 import time
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
-from pymongo import MongoClient, ASCENDING, DESCENDING
-from pymongo.errors import ConnectionFailure, OperationFailure, ServerSelectionTimeoutError
+from pymongo import MongoClient, ASCENDING, DESCENDING, GEOSPHERE, InsertOne
+from pymongo.errors import ConnectionFailure, OperationFailure, ServerSelectionTimeoutError, BulkWriteError
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,16 +25,22 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # MongoDB configuration
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://admin:admin123@mongodb:27017/smart_city?authSource=admin")
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://admin:admin123@localhost:27017/smart_city?authSource=admin")
 DATABASE_NAME = os.getenv("MONGO_DATABASE", "smart_city")
 COLLECTION_NAME = "telemetry"
-
-# TTL configuration (30 days in seconds)
-TTL_SECONDS = 30 * 24 * 60 * 60  # 2592000 seconds
 
 # Retry configuration
 MAX_RETRIES = 5
 INITIAL_BACKOFF = 1  # seconds
+
+class BatchInsertResult:
+    def __init__(self, inserted: int = 0, duplicates: int = 0, errors: int = 0):
+        self.inserted = inserted
+        self.duplicates = duplicates
+        self.errors = errors
+        
+    def __repr__(self):
+        return f"BatchInsertResult(inserted={self.inserted}, duplicates={self.duplicates}, errors={self.errors})"
 
 
 class MongoDBClient:
@@ -44,7 +50,8 @@ class MongoDBClient:
     Features:
     - Connection pooling for efficient resource usage
     - Automatic TTL index creation (30 days expiration)
-    - Compound index on (sensorId, timestamp) for efficient queries
+    - Compound indexes for efficient queries
+    - Geospatial indexes for location-based queries
     - Exponential backoff retry for transient failures
     """
     
@@ -89,7 +96,7 @@ class MongoDBClient:
                 logger.info("Successfully connected to MongoDB")
                 
                 # Create indexes
-                self._create_indexes()
+                self.create_indexes()
                 
                 return
                 
@@ -103,84 +110,142 @@ class MongoDBClient:
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 60)  # Exponential backoff, max 60 seconds
     
-    def _create_indexes(self):
+    def create_indexes(self):
         """
         Create required indexes for telemetry collection.
         
         Creates:
-        1. TTL index on timestamp field (30 days expiration)
-        2. Compound index on (sensorId, timestamp) for efficient range queries
-        
-        Validates: Requirements 4.2, 4.5
+        1. TTL index on expireAt field (30 days expiration)
+        2. Compound index on (sensorId, timestamp)
+        3. Compound index on (locationId, timestamp)
+        4. Compound index on (clusterId, timestamp)
+        5. Geospatial index on location (2dsphere)
+        6. Unique index on (sensorId, timestamp) to prevent duplicates
         """
         try:
-            # Create TTL index on timestamp field
-            # MongoDB will automatically delete documents older than 30 days
+            # 1. TTL index on expireAt field
             self._collection.create_index(
-                [("timestamp", ASCENDING)],
-                name="ttl_index",
-                expireAfterSeconds=TTL_SECONDS
+                [("expireAt", ASCENDING)],
+                name="ttl_expire_at",
+                expireAfterSeconds=0
             )
-            logger.info(f"Created TTL index on timestamp field (expireAfterSeconds={TTL_SECONDS})")
+            logger.info("Created TTL index on expireAt field")
             
-            # Create compound index on (sensorId, timestamp) for efficient queries
+            # 2. Compound index on (sensorId, timestamp) & Unique constraint
             self._collection.create_index(
                 [("sensorId", ASCENDING), ("timestamp", DESCENDING)],
-                name="sensor_timestamp_index"
+                name="sensor_timestamp_unique",
+                unique=True
             )
-            logger.info("Created compound index on (sensorId, timestamp)")
+            logger.info("Created compound/unique index on (sensorId, timestamp)")
+
+            # 3. Compound index on (locationId, timestamp)
+            self._collection.create_index(
+                [("locationId", ASCENDING), ("timestamp", DESCENDING)],
+                name="location_timestamp_index"
+            )
+            logger.info("Created compound index on (locationId, timestamp)")
+
+            # 4. Compound index on (clusterId, timestamp)
+            self._collection.create_index(
+                [("clusterId", ASCENDING), ("timestamp", DESCENDING)],
+                name="cluster_timestamp_index"
+            )
+            logger.info("Created compound index on (clusterId, timestamp)")
+
+            # 5. Geospatial index on location field (2dsphere)
+            self._collection.create_index(
+                [("location", GEOSPHERE)],
+                name="location_2dsphere"
+            )
+            logger.info("Created geospatial index on location field (2dsphere)")
             
         except OperationFailure as e:
             logger.error(f"Failed to create indexes: {e}")
             raise
     
     def insert_telemetry(self, telemetry: Telemetry) -> bool:
+        retries = 0
+        backoff = INITIAL_BACKOFF
+        while retries < MAX_RETRIES:
+            try:
+                doc = telemetry.model_dump()
+                result = self._collection.insert_one(doc)
+                if result.inserted_id:
+                    return True
+                return False
+            except OperationFailure as e:
+                # E11000 duplicate key error
+                if e.code == 11000:
+                    logger.warning(f"Duplicate telemetry skipped for sensor {telemetry.sensorId} at {telemetry.timestamp}")
+                    return False
+            except ConnectionFailure as e:
+                retries += 1
+                if retries >= MAX_RETRIES:
+                    return False
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 60)
+                try:
+                    self._connect()
+                except Exception:
+                    pass
+        return False
+
+    def batch_insert_telemetry(self, telemetries: List[Telemetry], batch_size: int = 100) -> BatchInsertResult:
         """
-        Insert telemetry document into MongoDB collection.
-        
-        Args:
-            telemetry: Telemetry object containing sensor measurements
-        
-        Returns:
-            bool: True if insertion successful, False otherwise
-        
-        Validates: Requirement 4.1
+        Batch insert telemetry documents with error handling.
         """
+        result = BatchInsertResult()
+        
+        if not telemetries:
+            return result
+            
         retries = 0
         backoff = INITIAL_BACKOFF
         
         while retries < MAX_RETRIES:
             try:
-                # Convert Pydantic model to dict
-                doc = telemetry.model_dump()
+                operations = []
+                for tel in telemetries:
+                    operations.append(InsertOne(tel.model_dump()))
                 
-                # Insert document with write concern w=1 for performance
-                result = self._collection.insert_one(doc)
+                if operations:
+                    # ordered=False allows to continue on duplicate key errors
+                    bulk_result = self._collection.bulk_write(operations, ordered=False)
+                    result.inserted = bulk_result.inserted_count
+                return result
                 
-                if result.inserted_id:
-                    logger.debug(f"Inserted telemetry for sensor {telemetry.sensorId}")
-                    return True
-                else:
-                    logger.warning(f"Failed to insert telemetry for sensor {telemetry.sensorId}")
-                    return False
-                    
+            except BulkWriteError as bwe:
+                # Handle Duplicate key errors (E11000)
+                write_errors = bwe.details.get('writeErrors', [])
+                result.inserted = bwe.details.get('nInserted', 0)
+                
+                for err in write_errors:
+                    if err.get('code') == 11000:
+                        result.duplicates += 1
+                    else:
+                        result.errors += 1
+                        
+                logger.warning(f"Batch insert completed with {result.duplicates} duplicates and {result.errors} errors.")
+                return result
+                
             except (ConnectionFailure, OperationFailure) as e:
                 retries += 1
                 if retries >= MAX_RETRIES:
-                    logger.error(f"Failed to insert telemetry after {MAX_RETRIES} attempts: {e}")
-                    return False
+                    logger.error(f"Failed to batch insert telemetry after {MAX_RETRIES} attempts: {e}")
+                    result.errors = len(telemetries)
+                    return result
                 
-                logger.warning(f"Insert operation failed: {e}. Retrying in {backoff} seconds...")
+                logger.warning(f"Batch insert operation failed: {e}. Retrying in {backoff} seconds...")
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 60)
                 
-                # Attempt to reconnect
                 try:
                     self._connect()
-                except Exception as reconnect_error:
-                    logger.error(f"Reconnection failed: {reconnect_error}")
+                except Exception:
+                    pass
         
-        return False
+        return result
     
     def query_telemetry(
         self,
@@ -189,68 +254,21 @@ class MongoDBClient:
         end_time: Optional[datetime] = None,
         limit: int = 100
     ) -> List[Dict[str, Any]]:
-        """
-        Query telemetry data for a specific sensor with optional time range.
-        
-        Args:
-            sensor_id: Sensor identifier
-            start_time: Optional start of time range (inclusive)
-            end_time: Optional end of time range (inclusive)
-            limit: Maximum number of documents to return (default: 100)
-        
-        Returns:
-            List of telemetry documents sorted by timestamp descending
-        
-        Uses compound index (sensorId, timestamp) for efficient queries.
-        """
-        retries = 0
-        backoff = INITIAL_BACKOFF
-        
-        while retries < MAX_RETRIES:
-            try:
-                # Build query filter
-                query_filter = {"sensorId": sensor_id}
+        query_filter = {"sensorId": sensor_id}
+        if start_time or end_time:
+            query_filter["timestamp"] = {}
+            if start_time:
+                query_filter["timestamp"]["$gte"] = start_time
+            if end_time:
+                query_filter["timestamp"]["$lte"] = end_time
                 
-                # Add time range filters if provided
-                if start_time or end_time:
-                    query_filter["timestamp"] = {}
-                    if start_time:
-                        query_filter["timestamp"]["$gte"] = start_time
-                    if end_time:
-                        query_filter["timestamp"]["$lte"] = end_time
-                
-                # Execute query with compound index
-                cursor = self._collection.find(query_filter).sort(
-                    "timestamp", DESCENDING
-                ).limit(limit)
-                
-                # Convert cursor to list and remove MongoDB _id field
-                results = []
-                for doc in cursor:
-                    doc.pop("_id", None)  # Remove MongoDB internal ID
-                    results.append(doc)
-                
-                logger.debug(f"Retrieved {len(results)} telemetry documents for sensor {sensor_id}")
-                return results
-                
-            except (ConnectionFailure, OperationFailure) as e:
-                retries += 1
-                if retries >= MAX_RETRIES:
-                    logger.error(f"Failed to query telemetry after {MAX_RETRIES} attempts: {e}")
-                    return []
-                
-                logger.warning(f"Query operation failed: {e}. Retrying in {backoff} seconds...")
-                time.sleep(backoff)
-                backoff = min(backoff * 2, 60)
-                
-                # Attempt to reconnect
-                try:
-                    self._connect()
-                except Exception as reconnect_error:
-                    logger.error(f"Reconnection failed: {reconnect_error}")
-        
-        return []
-        
+        cursor = self._collection.find(query_filter).sort("timestamp", DESCENDING).limit(limit)
+        results = []
+        for doc in cursor:
+            doc.pop("_id", None)
+            results.append(doc)
+        return results
+
     def query_telemetry_aggregated(
         self,
         sensor_id: str,
@@ -259,76 +277,91 @@ class MongoDBClient:
         bucket_minutes: int
     ) -> List[Dict[str, Any]]:
         """
-        Query and downsample telemetry data for a specific sensor over a large time range.
-        
-        Args:
-            sensor_id: Sensor identifier
-            start_time: Start of time range (inclusive)
-            end_time: End of time range (inclusive)
-            bucket_minutes: Size of the time bucket for aggregation
-        
-        Returns:
-            List of aggregated telemetry documents sorted by timestamp descending
+        Query and downsample telemetry data using time-based aggregation.
         """
-        retries = 0
-        backoff = INITIAL_BACKOFF
-        
-        while retries < MAX_RETRIES:
-            try:
-                pipeline = [
-                    {
-                        "$match": {
-                            "sensorId": sensor_id,
-                            "timestamp": { "$gte": start_time, "$lte": end_time }
-                        }
+        pipeline = [
+            {
+                "$match": {
+                    "sensorId": sensor_id,
+                    "timestamp": {"$gte": start_time, "$lte": end_time}
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "$dateTrunc": {"date": "$timestamp", "unit": "minute", "binSize": bucket_minutes}
                     },
-                    {
-                        "$group": {
-                            "_id": {
-                                "$dateTrunc": { "date": "$timestamp", "unit": "minute", "binSize": bucket_minutes }
-                            },
-                            "locationId": { "$first": "$locationId" },
-                            "co2": { "$avg": "$co2" },
-                            "noise": { "$avg": "$noise" },
-                            "temperature": { "$avg": "$temperature" }
-                        }
+                    "locationId": {"$first": "$locationId"},
+                    "co2": {"$avg": "$data.co2"},
+                    "noise": {"$avg": "$data.noise"},
+                    "temperature": {"$avg": "$data.temperature"}
+                }
+            },
+            {"$sort": {"_id": -1}},
+            {
+                "$project": {
+                    "_id": 0,
+                    "sensorId": {"$literal": sensor_id},
+                    "locationId": 1,
+                    "timestamp": "$_id",
+                    "co2": 1,
+                    "noise": 1,
+                    "temperature": 1
+                }
+            }
+        ]
+
+        cursor = self._collection.aggregate(pipeline)
+        return list(cursor)
+
+    def get_cluster_telemetry(
+        self,
+        cluster_id: str,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Query telemetry data for a specific cluster.
+        """
+        query_filter = {"clusterId": cluster_id}
+        if start_time or end_time:
+            query_filter["timestamp"] = {}
+            if start_time:
+                query_filter["timestamp"]["$gte"] = start_time
+            if end_time:
+                query_filter["timestamp"]["$lte"] = end_time
+                
+        cursor = self._collection.find(query_filter).sort("timestamp", DESCENDING).limit(limit)
+        results = []
+        for doc in cursor:
+            doc.pop("_id", None)
+            results.append(doc)
+        return results
+
+    def find_nearby_sensors(self, longitude: float, latitude: float, max_distance_meters: float, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Geospatial query to find latest telemetry from sensors near a point.
+        """
+        query_filter = {
+            "location": {
+                "$near": {
+                    "$geometry": {
+                        "type": "Point",
+                        "coordinates": [longitude, latitude]
                     },
-                    { "$sort": { "_id": -1 } },
-                    {
-                        "$project": {
-                            "_id": 0,
-                            "sensorId": { "$literal": sensor_id },
-                            "locationId": 1,
-                            "timestamp": "$_id",
-                            "co2": 1,
-                            "noise": 1,
-                            "temperature": 1
-                        }
-                    }
-                ]
-                
-                cursor = self._collection.aggregate(pipeline)
-                results = list(cursor)
-                
-                logger.debug(f"Retrieved {len(results)} aggregated telemetry documents for sensor {sensor_id}")
-                return results
-                
-            except (ConnectionFailure, OperationFailure) as e:
-                retries += 1
-                if retries >= MAX_RETRIES:
-                    logger.error(f"Failed to query aggregated telemetry after {MAX_RETRIES} attempts: {e}")
-                    return []
-                
-                logger.warning(f"Aggregation operation failed: {e}. Retrying in {backoff} seconds...")
-                time.sleep(backoff)
-                backoff = min(backoff * 2, 60)
-                
-                try:
-                    self._connect()
-                except Exception as reconnect_error:
-                    logger.error(f"Reconnection failed: {reconnect_error}")
+                    "$maxDistance": max_distance_meters
+                }
+            }
+        }
         
-        return []
+        # We might want only the latest telemetry per sensor, but standard find will just return matching docs
+        cursor = self._collection.find(query_filter).limit(limit)
+        results = []
+        for doc in cursor:
+            doc.pop("_id", None)
+            results.append(doc)
+        return results
     
     def close(self):
         """Close MongoDB connection and release resources."""
@@ -340,13 +373,9 @@ class MongoDBClient:
 # Singleton instance
 _mongodb_client: Optional[MongoDBClient] = None
 
-
 def get_mongodb_client() -> MongoDBClient:
     """
     Get singleton MongoDB client instance.
-    
-    Returns:
-        MongoDBClient: Shared client instance with connection pooling
     """
     global _mongodb_client
     if _mongodb_client is None:

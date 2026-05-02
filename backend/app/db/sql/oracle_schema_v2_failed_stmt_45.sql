@@ -1,0 +1,1 @@
+SELECT 'Schema created successfully!' as Status FROM DUAL;

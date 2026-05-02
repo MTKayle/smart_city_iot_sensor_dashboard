@@ -1,0 +1,1 @@
+CREATE INDEX idx_clusters_location ON SENSOR_CLUSTERS(LocationID);

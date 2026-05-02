@@ -1,0 +1,1 @@
+CREATE INDEX idx_summary_time     ON TELEMETRY_SUMMARY(TimeBucket);

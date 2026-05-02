@@ -1,0 +1,1 @@
+CREATE INDEX idx_sensors_status   ON SENSOR_REGISTRY(Status);

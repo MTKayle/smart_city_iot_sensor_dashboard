@@ -1,0 +1,1 @@
+CREATE INDEX idx_summary_sensor   ON TELEMETRY_SUMMARY(SensorID);
