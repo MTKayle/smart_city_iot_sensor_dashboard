@@ -63,7 +63,8 @@ graph TB
 | **Latency** | ~0ms (in-memory) | ~0.1ms (local Redis) |
 | **Horizontal scale** | ❌ Không | ✅ Redis Cluster |
 
-> **IMPORTANT**: Redis được cấu hình `appendonly yes` (AOF) nên mọi message đều được ghi xuống disk.
+> [!IMPORTANT]
+> Redis được cấu hình `appendonly yes` (AOF) nên mọi message đều được ghi xuống disk.
 > Nếu backend crash, khi restart workers sẽ tự động re-process các message chưa XACK.
 
 ---
@@ -400,7 +401,9 @@ erDiagram
         VARCHAR2 LocationID PK
         VARCHAR2 Name
         VARCHAR2 ParentID FK
-        VARCHAR2 Type
+        VARCHAR2 Type "City|District|Ward"
+        NUMBER CenterLat
+        NUMBER CenterLng
     }
 
     SENSOR_REGISTRY {
@@ -409,20 +412,20 @@ erDiagram
         VARCHAR2 ClusterID FK
         NUMBER Latitude
         NUMBER Longitude
-        VARCHAR2 Status
+        VARCHAR2 Status "Active|Offline|..."
     }
 
     ALERTS {
         VARCHAR2 AlertID PK
         VARCHAR2 SensorID FK
-        VARCHAR2 AlertType
-        VARCHAR2 MetricType
+        VARCHAR2 AlertType "THRESHOLD|PREDICTIVE|ANOMALY"
+        VARCHAR2 MetricType "CO2|Noise|PM25|Humidity"
         NUMBER Value
         NUMBER Threshold
         NUMBER PredictedValue
         NUMBER ConfidenceScore
-        VARCHAR2 Severity
-        VARCHAR2 Status
+        VARCHAR2 Severity "LOW|MEDIUM|HIGH|CRITICAL"
+        VARCHAR2 Status "OPEN|ACKNOWLEDGED|RESOLVED"
         TIMESTAMP AcknowledgedAt
         TIMESTAMP ResolvedAt
     }
@@ -430,7 +433,7 @@ erDiagram
     TELEMETRY_SUMMARY {
         VARCHAR2 SummaryID PK
         TIMESTAMP TimeBucket
-        VARCHAR2 Granularity
+        VARCHAR2 Granularity "1h|1d"
         NUMBER AvgCO2
         NUMBER AvgNoise
         NUMBER AvgPM25
@@ -444,26 +447,48 @@ erDiagram
 ```javascript
 // Collection: telemetry
 {
-  sensorId:   "sen_q1_01_co2",
-  locationId: "ward_q1",
-  clusterId:  "cluster_q1",
-  data: { co2: 450.5, noise: 62.3, temperature: 28.1, pm25: 35.2, humidity: 72.0 },
-  location:   { type: "Point", coordinates: [106.6297, 10.8231] },
-  quality:    { batteryLevel: 85.0, signalStrength: -45.2 },
+  sensorId:   "sen_q1_01_co2",        // indexed
+  locationId: "ward_q1",              // indexed
+  clusterId:  "cluster_q1",           // indexed
+  data: {
+    co2:         450.5,
+    noise:       62.3,
+    temperature: 28.1,
+    pm25:        35.2,
+    humidity:    72.0
+  },
+  location: {                          // 2dsphere index
+    type: "Point",
+    coordinates: [106.6297, 10.8231]
+  },
+  quality: {
+    batteryLevel:   85.0,
+    signalStrength: -45.2
+  },
   timestamp:  ISODate("2026-05-03T14:00:00Z"),
   receivedAt: ISODate("2026-05-03T14:00:01Z"),
   expireAt:   ISODate("2026-06-02T14:00:01Z")  // TTL 30 days
 }
+
+// Indexes:
+// - {expireAt: 1}            TTL index (auto-delete after 30 days)
+// - {sensorId: 1, timestamp: -1}    compound
+// - {locationId: 1, timestamp: -1}  compound
+// - {clusterId: 1, timestamp: -1}   compound
+// - {location: "2dsphere"}          geospatial
 ```
 
 ### Redis (Message Queue)
 
 ```
 Stream: telemetry:stream
-├── MAXLEN ~10,000
-├── Consumer Group: "workers"  (consumer-0, consumer-1, consumer-2)
+├── MAXLEN ~10,000 (auto-trim oldest)
+├── Consumer Group: "workers"
+│   ├── consumer-0
+│   ├── consumer-1
+│   └── consumer-2
 ├── AOF persistence: appendonly yes
-└── Memory limit: 256MB (allkeys-lru)
+└── Memory limit: 256MB (allkeys-lru eviction)
 ```
 
 ---
@@ -472,12 +497,12 @@ Stream: telemetry:stream
 
 ```mermaid
 graph TD
-    MQ["Mosquitto :1883"] 
-    MDB["MongoDB :27017"]
-    ORA["Oracle XE :1521"]
-    RED["Redis :6379"]
-    BE["Backend :8000"]
-    FE["Frontend :3000"]
+    MQ["Mosquitto<br/>:1883"] 
+    MDB["MongoDB<br/>:27017"]
+    ORA["Oracle XE<br/>:1521"]
+    RED["Redis<br/>:6379"]
+    BE["Backend<br/>:8000"]
+    FE["Frontend<br/>:3000"]
     SIM["IoT Simulator"]
 
     BE -->|depends_on healthy| MDB
@@ -499,17 +524,17 @@ graph TD
 
 ## ⚙️ Environment Variables
 
-| Variable | Default | Mô tả |
-|----------|---------|-------|
-| `MQTT_BROKER_HOST` | mosquitto | MQTT broker hostname |
-| `MQTT_BROKER_PORT` | 1883 | MQTT broker port |
-| `MONGODB_URI` | mongodb://admin:admin123@mongodb:27017/... | MongoDB connection |
-| `ORACLE_USER` | SMARTCITY | Oracle app schema |
-| `ORACLE_PASSWORD` | SmartCity2026! | Oracle password |
-| `ORACLE_DSN` | oracle-xe:1521/XEPDB1 | Oracle TNS |
-| `REDIS_URL` | redis://redis:6379/0 | Redis Streams URL |
-| `REACT_APP_API_URL` | http://localhost:8000 | Backend API URL |
-| `REACT_APP_WS_URL` | ws://localhost:8000/ws | WebSocket URL |
+| Variable | Default | Service | Mô tả |
+|----------|---------|---------|-------|
+| `MQTT_BROKER_HOST` | mosquitto | Backend, Simulator | MQTT broker hostname |
+| `MQTT_BROKER_PORT` | 1883 | Backend, Simulator | MQTT broker port |
+| `MONGODB_URI` | mongodb://admin:admin123@mongodb:27017/... | Backend | MongoDB connection string |
+| `ORACLE_USER` | SMARTCITY | Backend | Oracle app schema user |
+| `ORACLE_PASSWORD` | SmartCity2026! | Backend | Oracle app user password |
+| `ORACLE_DSN` | oracle-xe:1521/XEPDB1 | Backend | Oracle TNS connect string |
+| `REDIS_URL` | redis://redis:6379/0 | Backend | Redis Streams URL |
+| `REACT_APP_API_URL` | http://localhost:8000 | Frontend | Backend API base URL |
+| `REACT_APP_WS_URL` | ws://localhost:8000/ws | Frontend | WebSocket endpoint |
 
 ---
 
@@ -518,28 +543,28 @@ graph TD
 ```
 backend/
 ├── app/
-│   ├── main.py                    # FastAPI entry + lifespan
+│   ├── main.py                    # FastAPI entry point + lifespan
 │   ├── core/
 │   │   ├── config.py              # Settings (env vars)
 │   │   └── websocket_manager.py   # WebSocket broadcast manager
 │   ├── messaging/
-│   │   ├── mqtt_consumer.py       # MQTT → Redis XADD
-│   │   └── worker_pool.py         # Redis Streams worker pool
+│   │   ├── mqtt_consumer.py       # MQTT subscriber → Redis XADD
+│   │   └── worker_pool.py         # Redis Streams worker pool (3 workers)
 │   ├── services/
-│   │   ├── alert_service.py       # Threshold + Predictive + Anomaly
-│   │   ├── telemetry_service.py   # Enrichment + validation
+│   │   ├── alert_service.py       # Threshold + Predictive + Anomaly + Lifecycle
+│   │   ├── telemetry_service.py   # Enrichment + validation (legacy)
 │   │   ├── analytics_service.py   # Moving averages + Clean Score
-│   │   └── scheduler.py           # APScheduler hourly job
+│   │   └── scheduler.py           # APScheduler hourly aggregation
 │   ├── db/
-│   │   ├── oracle_client.py       # Oracle connection pool
-│   │   ├── mongodb_client.py      # MongoDB client
-│   │   └── sql/                   # Schema v2 + seed
+│   │   ├── oracle_client.py       # Oracle connection pool + CRUD
+│   │   ├── mongodb_client.py      # MongoDB client + batch insert
+│   │   └── sql/                   # Schema v2 + seed data
 │   ├── models/                    # Pydantic models
 │   └── api/
 │       ├── routes.py              # REST endpoints
-│       └── websocket.py           # WebSocket /ws
+│       └── websocket.py           # WebSocket /ws endpoint
 ├── tests/
-│   └── test_alert_service_v2.py
-├── requirements.txt
+│   └── test_alert_service_v2.py   # 25+ alert engine tests
+├── requirements.txt               # Python deps (+ scikit-learn, numpy, redis)
 └── Dockerfile
 ```

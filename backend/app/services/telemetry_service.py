@@ -333,34 +333,75 @@ class TelemetryService:
 
     def _check_and_create_alerts(self, telemetry: Telemetry):
         """
-        Check telemetry values against thresholds and create alerts.
+        Check telemetry values against thresholds, run predictive analysis
+        and anomaly detection, then create alerts as needed.
 
-        Delegates to AlertService using enriched data fields.
+        Checks:
+        - CO2 threshold
+        - Noise threshold
+        - PM2.5 threshold
+        - Humidity threshold
+        - Predictive alerts (linear regression 1h ahead)
+        - Anomaly detection (Z-score)
 
         Args:
             telemetry: Enriched Telemetry object
 
-        Validates: FR6.1, FR6.2
+        Validates: FR5.1, FR5.2, FR5.3, FR5.4, FR10.1, FR10.2
         """
         data = telemetry.data
+        sid = telemetry.sensorId
+        lid = telemetry.locationId
+        cid = telemetry.clusterId
+        ts = telemetry.timestamp
 
-        # CO2 threshold check
-        if data.co2 is not None:
-            self.alert_service.create_alert(
-                sensor_id=telemetry.sensorId,
-                metric_type="CO2",
-                value=data.co2,
-                timestamp=telemetry.timestamp,
+        # Metric → value mapping for threshold + anomaly + predictive checks
+        metrics = {
+            "CO2": data.co2,
+            "Noise": data.noise,
+            "PM25": data.pm25,
+            "Humidity": data.humidity,
+        }
+
+        for metric_type, value in metrics.items():
+            if value is None:
+                continue
+
+            # 6.1 — Threshold check
+            self.alert_service.check_threshold_alerts(
+                sensor_id=sid,
+                location_id=lid,
+                metric_type=metric_type,
+                value=value,
+                cluster_id=cid,
+                timestamp=ts,
             )
 
-        # Noise threshold check
-        if data.noise is not None:
-            self.alert_service.create_alert(
-                sensor_id=telemetry.sensorId,
-                metric_type="Noise",
-                value=data.noise,
-                timestamp=telemetry.timestamp,
-            )
+            # 6.3 — Predictive alert (linear regression)
+            try:
+                self.alert_service.check_predictive_alerts(
+                    sensor_id=sid,
+                    location_id=lid,
+                    metric_type=metric_type,
+                    cluster_id=cid,
+                    timestamp=ts,
+                )
+            except Exception as e:
+                logger.warning(f"[alerts] Predictive check failed for {metric_type}: {e}")
+
+            # 6.4 — Anomaly detection (Z-score)
+            try:
+                self.alert_service.detect_anomalies(
+                    sensor_id=sid,
+                    location_id=lid,
+                    metric_type=metric_type,
+                    current_value=value,
+                    cluster_id=cid,
+                    timestamp=ts,
+                )
+            except Exception as e:
+                logger.warning(f"[alerts] Anomaly check failed for {metric_type}: {e}")
+
 
     # -----------------------------------------------------------------------
     # 4.3 – WebSocket broadcast

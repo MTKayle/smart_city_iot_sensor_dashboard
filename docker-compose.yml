@@ -63,6 +63,23 @@ services:
     restart: unless-stopped
     shm_size: 1gb
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis-queue
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - smart-city-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -80,12 +97,15 @@ services:
       ORACLE_ADMIN_USER: ${ORACLE_ADMIN_USER}
       ORACLE_ADMIN_PASSWORD: ${ORACLE_ADMIN_PASSWORD}
       API_BASE_URL: ${API_BASE_URL}
+      REDIS_URL: ${REDIS_URL}
     depends_on:
       mosquitto:
         condition: service_started
       mongodb:
         condition: service_healthy
       oracle-xe:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - smart-city-network
@@ -132,3 +152,4 @@ volumes:
   mosquitto-logs:
   mongodb-data:
   oracle-data:
+  redis-data:
