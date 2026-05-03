@@ -2,14 +2,20 @@
 MQTT Consumer Module for Smart City IoT Dashboard.
 
 This module subscribes to MQTT telemetry topics, parses incoming sensor data,
-validates it using Pydantic models, and processes valid messages.
+validates it using Pydantic models, and enqueues valid messages into the
+TelemetryPipeline's AsyncQueue for worker-pool processing.
 
-Implements:
-- Subscription to sensors/+/telemetry topic pattern
-- JSON parsing and Pydantic validation
-- Graceful error handling for invalid messages
-- Reconnection logic with exponential backoff
-- Configuration via environment variables
+Flow:
+    MQTT Broker (QoS 1)
+         │ subscribe
+         ▼
+    MQTTConsumer (paho-mqtt thread)
+         │ 1. Decode + JSON parse
+         │ 2. Pydantic validation
+         │ 3. (optional) message-level dedup
+         │ 4. Non-blocking enqueue (1 s timeout)
+         ▼
+    TelemetryPipeline.enqueue()
 
 Requirements: 3.4, 3.5, 5.1, 5.2
 """
@@ -44,13 +50,15 @@ class MQTTConsumer:
     - Message validation using Pydantic models
     - Graceful error handling
     - Configurable telemetry processing handler
+    - Support for TelemetryPipeline enqueue (worker-pool mode)
     """
     
     def __init__(
         self,
         broker_host: Optional[str] = None,
         broker_port: Optional[int] = None,
-        telemetry_handler: Optional[Callable[[Telemetry], None]] = None
+        telemetry_handler: Optional[Callable[[Telemetry], None]] = None,
+        telemetry_pipeline=None,
     ):
         """
         Initialize MQTT Consumer.
@@ -58,11 +66,13 @@ class MQTTConsumer:
         Args:
             broker_host: MQTT broker hostname (defaults to MQTT_BROKER_HOST env var)
             broker_port: MQTT broker port (defaults to MQTT_BROKER_PORT env var)
-            telemetry_handler: Callback function to process valid telemetry data
+            telemetry_handler: Legacy callback function to process valid telemetry data
+            telemetry_pipeline: TelemetryPipeline instance for worker-pool mode
         """
         self.broker_host = broker_host or os.getenv('MQTT_BROKER_HOST', 'mosquitto')
         self.broker_port = broker_port or int(os.getenv('MQTT_BROKER_PORT', '1883'))
         self.telemetry_handler = telemetry_handler
+        self.telemetry_pipeline = telemetry_pipeline
         
         # Reconnection parameters
         self.reconnect_delay = 1  # Initial delay in seconds
@@ -78,8 +88,14 @@ class MQTTConsumer:
         # Topic pattern for sensor telemetry
         self.topic_pattern = "sensors/+/telemetry"
         
+        # Metrics
+        self._msg_count = 0
+        self._error_count = 0
+        
+        mode = "pipeline" if telemetry_pipeline else ("handler" if telemetry_handler else "none")
         logger.info(
-            f"MQTT Consumer initialized - Broker: {self.broker_host}:{self.broker_port}"
+            f"MQTT Consumer initialized - Broker: {self.broker_host}:{self.broker_port}, "
+            f"mode={mode}"
         )
     
     def _on_connect(self, client, userdata, flags, rc):
@@ -99,8 +115,8 @@ class MQTTConsumer:
             self.reconnect_attempts = 0
             
             # Subscribe to telemetry topic pattern
-            client.subscribe(self.topic_pattern)
-            logger.info(f"Subscribed to topic pattern: {self.topic_pattern}")
+            client.subscribe(self.topic_pattern, qos=1)
+            logger.info(f"Subscribed to topic pattern: {self.topic_pattern} (QoS 1)")
         else:
             logger.error(f"Failed to connect to MQTT broker - Return code: {rc}")
     
@@ -151,7 +167,7 @@ class MQTTConsumer:
         Callback when message is received from MQTT broker.
         
         Parses JSON payload, validates using Pydantic Telemetry model,
-        and calls telemetry handler for valid messages.
+        and either enqueues to pipeline or calls telemetry handler.
         
         Args:
             client: MQTT client instance
@@ -171,45 +187,61 @@ class MQTTConsumer:
                     f"Invalid JSON in message from topic {msg.topic}: {e}. "
                     f"Payload: {payload_str[:200]}"
                 )
+                self._error_count += 1
                 return
             
             # Validate and parse into Telemetry object
             try:
                 telemetry = Telemetry(**payload_dict)
-                logger.debug(
-                    f"Valid telemetry received - Sensor: {telemetry.sensorId}, "
-                    f"CO2: {telemetry.co2}, Noise: {telemetry.noise}, "
-                    f"Temp: {telemetry.temperature}"
-                )
-                
-                # Call telemetry handler if configured
-                if self.telemetry_handler:
-                    self.telemetry_handler(telemetry)
-                else:
-                    logger.warning("No telemetry handler configured - message not processed")
-                    
             except ValidationError as e:
                 logger.error(
                     f"Validation error for message from topic {msg.topic}: {e}. "
                     f"Payload: {payload_str[:200]}"
                 )
+                self._error_count += 1
                 return
-                
+
+            self._msg_count += 1
+
+            # ── Route to pipeline (preferred) or legacy handler ──
+            if self.telemetry_pipeline is not None:
+                # Worker-pool mode: non-blocking enqueue
+                self.telemetry_pipeline.enqueue(telemetry)
+            elif self.telemetry_handler is not None:
+                # Legacy mode: direct synchronous call
+                self.telemetry_handler(telemetry)
+            else:
+                logger.warning("No telemetry handler or pipeline configured — message not processed")
+                    
         except Exception as e:
             logger.error(
                 f"Unexpected error processing message from topic {msg.topic}: {e}",
                 exc_info=True
             )
+            self._error_count += 1
     
     def set_telemetry_handler(self, handler: Callable[[Telemetry], None]):
         """
-        Set or update the telemetry processing handler.
+        Set or update the telemetry processing handler (legacy mode).
         
         Args:
             handler: Callback function that receives validated Telemetry objects
         """
         self.telemetry_handler = handler
         logger.info("Telemetry handler updated")
+
+    def set_telemetry_pipeline(self, pipeline):
+        """
+        Set the TelemetryPipeline for worker-pool mode.
+
+        When a pipeline is set, ``_on_message`` will enqueue into the
+        pipeline's AsyncQueue instead of calling ``telemetry_handler`` directly.
+
+        Args:
+            pipeline: TelemetryPipeline instance
+        """
+        self.telemetry_pipeline = pipeline
+        logger.info("Telemetry pipeline set — consumer now routes to worker pool")
     
     def connect(self):
         """
@@ -256,7 +288,10 @@ class MQTTConsumer:
         logger.info("Disconnecting from MQTT broker...")
         self.client.loop_stop()
         self.client.disconnect()
-        logger.info("Disconnected from MQTT broker")
+        logger.info(
+            f"Disconnected from MQTT broker — "
+            f"processed={self._msg_count}, errors={self._error_count}"
+        )
 
 
 # Example usage and testing
@@ -272,9 +307,7 @@ if __name__ == "__main__":
         print(f"Telemetry Received:")
         print(f"  Sensor ID: {telemetry.sensorId}")
         print(f"  Location ID: {telemetry.locationId}")
-        print(f"  CO2: {telemetry.co2} ppm")
-        print(f"  Noise: {telemetry.noise} dB")
-        print(f"  Temperature: {telemetry.temperature} °C")
+        print(f"  Data: {telemetry.data}")
         print(f"  Timestamp: {telemetry.timestamp}")
         print(f"{'='*60}\n")
     

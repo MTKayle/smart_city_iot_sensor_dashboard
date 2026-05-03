@@ -10,3 +10,8 @@ APScheduler==3.10.4
 python-dotenv==1.0.0
 websockets==12.0
 httpx==0.26.0
+# ML dependencies for predictive alerts and anomaly detection (Task 6.3, 6.4)
+scikit-learn==1.4.0
+numpy==1.26.3
+# Redis Streams — durable message queue (Task 17)
+redis==5.0.1

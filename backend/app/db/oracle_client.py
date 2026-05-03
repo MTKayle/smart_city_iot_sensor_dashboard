@@ -1181,6 +1181,262 @@ class OracleClient:
         except Exception:
             return False
 
+    # =========================================================================
+    # TASK 6 – Enhanced Alert Methods
+    # =========================================================================
+
+    def insert_alert_v2(self, alert) -> bool:
+        """
+        Insert alert record into ALERTS table using the v2 schema.
+
+        Supports all v2 columns: AlertType, Severity, Threshold,
+        PredictedValue, ConfidenceScore, Status, Message.
+
+        Args:
+            alert: Alert pydantic model (v2)
+
+        Returns:
+            bool: True if insertion successful
+
+        Validates: FR5.1, FR5.2, FR5.3
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO ALERTS (
+                        AlertID, SensorID, ClusterID, LocationID,
+                        AlertType, MetricType,
+                        Value, Threshold, PredictedValue, ConfidenceScore,
+                        Severity, Status,
+                        CreatedAt, Message
+                    ) VALUES (
+                        :alert_id, :sensor_id, :cluster_id, :location_id,
+                        :alert_type, :metric_type,
+                        :value, :threshold, :predicted_value, :confidence_score,
+                        :severity, :status,
+                        :created_at, :message
+                    )
+                    """,
+                    {
+                        'alert_id':         alert.alertId,
+                        'sensor_id':        alert.sensorId,
+                        'cluster_id':       alert.clusterId,
+                        'location_id':      alert.locationId,
+                        'alert_type':       alert.alertType.value if hasattr(alert.alertType, 'value') else str(alert.alertType),
+                        'metric_type':      alert.metricType,
+                        'value':            alert.value,
+                        'threshold':        alert.threshold,
+                        'predicted_value':  alert.predictedValue,
+                        'confidence_score': alert.confidenceScore,
+                        'severity':         alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity),
+                        'status':           alert.status or 'OPEN',
+                        'created_at':       alert.createdAt,
+                        'message':          alert.message,
+                    }
+                )
+                connection.commit()
+                logger.debug(f"Inserted alert (v2) {alert.alertId}")
+                return True
+            except oracledb.DatabaseError as e:
+                connection.rollback()
+                logger.error(f"Failed to insert alert (v2) {alert.alertId}: {e}")
+                return False
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry("insert_alert_v2", operation)
+        except Exception:
+            return False
+
+    def get_recent_alerts_for_sensor(
+        self,
+        sensor_id: str,
+        metric_type: str,
+        alert_type: str,
+        window_minutes: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Query ALERTS for recent alerts matching sensor + metric + alert type
+        within a time window.
+
+        Used for deduplication — returns alerts created within the last
+        *window_minutes* minutes.
+
+        Args:
+            sensor_id:      Sensor identifier
+            metric_type:    Metric type (CO2, Noise, PM25, Humidity)
+            alert_type:     Alert type (THRESHOLD, PREDICTIVE, ANOMALY)
+            window_minutes: How far back to look (default 5)
+
+        Returns:
+            List of matching alert dicts, ordered by CreatedAt DESC
+
+        Validates: FR5.4
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT AlertID, SensorID, MetricType, AlertType,
+                           Value, Severity, Status, CreatedAt
+                    FROM   ALERTS
+                    WHERE  SensorID   = :sensor_id
+                    AND    MetricType = :metric_type
+                    AND    AlertType  = :alert_type
+                    AND    CreatedAt >= CURRENT_TIMESTAMP - NUMTODSINTERVAL(:window_min, 'MINUTE')
+                    ORDER BY CreatedAt DESC
+                    """,
+                    {
+                        'sensor_id':   sensor_id,
+                        'metric_type': metric_type,
+                        'alert_type':  alert_type,
+                        'window_min':  window_minutes,
+                    }
+                )
+                cols = [d[0].lower() for d in cursor.description]
+                return [dict(zip(cols, row)) for row in cursor]
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry(
+                "get_recent_alerts_for_sensor", operation
+            )
+        except Exception as e:
+            logger.error(f"Failed to query recent alerts: {e}")
+            return []
+
+    def update_alert_status(
+        self,
+        alert_id: str,
+        new_status: str,
+        acknowledged_at: Optional[datetime] = None,
+        resolved_at: Optional[datetime] = None,
+    ) -> bool:
+        """
+        Update the status of an alert (lifecycle transitions).
+
+        Supports:
+        - OPEN → ACKNOWLEDGED  (sets AcknowledgedAt)
+        - OPEN/ACKNOWLEDGED → RESOLVED  (sets ResolvedAt)
+
+        Args:
+            alert_id:         Alert identifier
+            new_status:       Target status (ACKNOWLEDGED, RESOLVED)
+            acknowledged_at:  Timestamp for acknowledgment
+            resolved_at:      Timestamp for resolution
+
+        Returns:
+            bool: True if update succeeded
+
+        Validates: FR5.5
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                if new_status == "ACKNOWLEDGED":
+                    cursor.execute(
+                        """
+                        UPDATE ALERTS
+                        SET    Status         = :new_status,
+                               AcknowledgedAt = :ack_at
+                        WHERE  AlertID = :alert_id
+                        AND    Status  = 'OPEN'
+                        """,
+                        {
+                            'new_status': new_status,
+                            'ack_at':     acknowledged_at or datetime.utcnow(),
+                            'alert_id':   alert_id,
+                        }
+                    )
+                elif new_status == "RESOLVED":
+                    cursor.execute(
+                        """
+                        UPDATE ALERTS
+                        SET    Status     = :new_status,
+                               ResolvedAt = :resolved_at
+                        WHERE  AlertID = :alert_id
+                        AND    Status IN ('OPEN', 'ACKNOWLEDGED')
+                        """,
+                        {
+                            'new_status':  new_status,
+                            'resolved_at': resolved_at or datetime.utcnow(),
+                            'alert_id':    alert_id,
+                        }
+                    )
+                else:
+                    logger.warning(f"Invalid alert status transition: {new_status}")
+                    return False
+
+                rows_updated = cursor.rowcount
+                connection.commit()
+
+                if rows_updated == 0:
+                    logger.warning(
+                        f"Alert {alert_id} not updated — already in target "
+                        f"status or not found"
+                    )
+                    return False
+
+                logger.info(f"Alert {alert_id} → {new_status}")
+                return True
+
+            except oracledb.DatabaseError as e:
+                connection.rollback()
+                logger.error(f"Failed to update alert {alert_id}: {e}")
+                return False
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry("update_alert_status", operation)
+        except Exception:
+            return False
+
+    def get_alert_by_id(self, alert_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a single alert record by AlertID.
+
+        Args:
+            alert_id: Alert identifier
+
+        Returns:
+            dict with alert details, or None if not found
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT AlertID, SensorID, ClusterID, LocationID,
+                           AlertType, MetricType,
+                           Value, Threshold, PredictedValue, ConfidenceScore,
+                           Severity, Status,
+                           CreatedAt, AcknowledgedAt, ResolvedAt,
+                           Message
+                    FROM   ALERTS
+                    WHERE  AlertID = :alert_id
+                    """,
+                    {'alert_id': alert_id}
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    return None
+                cols = [d[0].lower() for d in cursor.description]
+                return dict(zip(cols, row))
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry("get_alert_by_id", operation)
+        except Exception as e:
+            logger.error(f"Failed to get alert {alert_id}: {e}")
+            return None
+
     def close(self):
         """Close Oracle connection pool and release resources."""
         if self._pool:

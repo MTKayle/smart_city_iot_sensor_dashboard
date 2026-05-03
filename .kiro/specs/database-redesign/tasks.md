@@ -99,8 +99,8 @@ This task list implements the production database redesign for the Smart City Io
     - _Requirements: NFR1.2, NFR1.5, NFR3.3_
 
 
-- [ ] 4. Update Telemetry Service
-  - [ ] 4.1 Implement telemetry enrichment
+- [x] 4. Update Telemetry Service
+  - [x] 4.1 Implement telemetry enrichment
     - Create `enrich_telemetry_with_geolocation()` function
     - Query sensor registry from Oracle for geolocation
     - Add cluster ID assignment
@@ -110,7 +110,7 @@ This task list implements the production database redesign for the Smart City Io
     - Test enrichment with sample telemetry
     - _Requirements: FR4.1, FR4.2, FR4.3, FR4.4_
   
-  - [ ] 4.2 Update telemetry storage logic
+  - [x] 4.2 Update telemetry storage logic
     - Update `store_telemetry()` to use enriched model
     - Use batch insert for better performance
     - Add validation before storage
@@ -118,7 +118,7 @@ This task list implements the production database redesign for the Smart City Io
     - Test with valid and invalid telemetry
     - _Requirements: FR4.4, NFR1.2, NFR3.3_
   
-  - [ ] 4.3 Add WebSocket broadcast
+  - [x] 4.3 Add WebSocket broadcast
     - Broadcast enriched telemetry via WebSocket
     - Format message with type field
     - Handle broadcast failures gracefully
@@ -126,8 +126,8 @@ This task list implements the production database redesign for the Smart City Io
     - _Requirements: FR4.5, IR2.1, NFR1.3_
 
 
-- [ ] 5. Update Oracle Client
-  - [ ] 5.1 Add sensor registry methods
+- [x] 5. Update Oracle Client
+  - [x] 5.1 Add sensor registry methods
     - Implement `get_sensor(sensor_id)` method
     - Implement `get_sensors_by_location(location_id)` method
     - Implement `get_sensors_by_cluster(cluster_id)` method
@@ -137,14 +137,14 @@ This task list implements the production database redesign for the Smart City Io
     - Test all CRUD operations
     - _Requirements: FR1.2, FR1.3, IR3.1, IR3.2, IR3.3, IR3.4_
   
-  - [ ] 5.2 Add location hierarchy methods
+  - [x] 5.2 Add location hierarchy methods
     - Implement `get_location_hierarchy(location_id)` method
     - Implement `get_location(location_id)` method
     - Implement `get_all_locations()` method
     - Test recursive hierarchy queries
     - _Requirements: FR1.1, FR8.1_
   
-  - [ ] 5.3 Add cluster methods
+  - [x] 5.3 Add cluster methods
     - Implement `get_cluster(cluster_id)` method
     - Implement `get_all_clusters()` method
     - Implement `update_cluster_sensor_count()` method
@@ -533,9 +533,42 @@ This task list implements the production database redesign for the Smart City Io
     - Monitor for errors
     - _Requirements: NFR3.1, NFR3.2, MR1.1, MR1.2, MR1.3, MR1.4_
 
+
+- [x] 17. Worker Pool Data Flow Redesign
+  - [x] 17.1 Create TelemetryPipeline (worker pool)
+    - Create `backend/app/messaging/worker_pool.py`
+    - Implement AsyncQueue (maxsize 10000, backpressure)
+    - Implement configurable worker pool (default 3 workers)
+    - Implement batch collection (100 messages OR 1 second timeout)
+    - Add telemetry enrichment via Oracle in thread-pool executor
+    - Add message-level deduplication (sensorId + timestamp)
+    - _Requirements: NFR1.2, NFR3.3_
+  
+  - [x] 17.2 Implement parallel processing fan-out
+    - Branch A: MongoDB batch insert (in executor)
+    - Branch B: Alert engine — threshold, predictive, anomaly (in executor)
+    - Branch C: WebSocket broadcast (direct from enriched data, no MongoDB round-trip)
+    - All 3 branches run via `asyncio.gather()` in parallel
+    - _Requirements: FR4.4, FR4.5, FR5.1–FR5.3, NFR1.3_
+  
+  - [x] 17.3 Update MQTT consumer for pipeline mode
+    - Add `telemetry_pipeline` parameter to MQTTConsumer
+    - Route messages to pipeline.enqueue() instead of direct handler
+    - Keep backward-compatible legacy handler mode
+    - Subscribe with QoS 1
+    - Add message metrics (count, errors)
+    - _Requirements: NFR1.2_
+  
+  - [x] 17.4 Update application entry point
+    - Wire TelemetryPipeline in FastAPI lifespan
+    - Start worker pool on startup, stop on shutdown
+    - Connect MQTT consumer to pipeline
+    - Add `/pipeline/metrics` observability endpoint
+    - _Requirements: NFR1.1, NFR1.2, NFR1.3_
+
 ---
 
-**Task List Version:** 1.0  
-**Total Tasks:** 16 main tasks, 80+ sub-tasks  
+**Task List Version:** 1.1  
+**Total Tasks:** 17 main tasks, 85+ sub-tasks  
 **Estimated Duration:** 10 working days (2 weeks)  
-**Last Updated:** May 2, 2026
+**Last Updated:** May 3, 2026

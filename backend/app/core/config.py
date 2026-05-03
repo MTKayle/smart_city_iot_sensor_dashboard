@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     oracle_password: str = "OraclePass123"
     oracle_dsn: str = "oracle-xe:1521/XEPDB1"
     
+    # Redis Configuration (durable message queue)
+    redis_url: str = "redis://redis:6379/0"
+    
     # API Configuration
     api_base_url: str = "http://localhost:8000"
     
