@@ -15,7 +15,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, date
 import oracledb
 
-from app.models import Location, SensorRegistry, Alert
+from app.models import Location, SensorRegistry, SensorCluster, SensorCapability, Alert
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -682,6 +682,505 @@ class OracleClient:
 
 
     
+    def get_sensor_geolocation(self, sensor_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Query geolocation and cluster metadata for a sensor from SENSOR_REGISTRY.
+
+        Returns a dict with keys: latitude, longitude, clusterId, locationId.
+        Returns None if sensor not found or query fails.
+
+        Args:
+            sensor_id: Unique sensor identifier
+
+        Returns:
+            dict with geolocation info, or None
+
+        Validates: FR4.1, FR4.2
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT Latitude, Longitude, ClusterID, LocationID
+                    FROM SENSOR_REGISTRY
+                    WHERE SensorID = :sensor_id
+                    """,
+                    {'sensor_id': sensor_id}
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    logger.warning(f"Sensor '{sensor_id}' not found in SENSOR_REGISTRY")
+                    return None
+                lat, lng, cluster_id, location_id = row
+                return {
+                    "latitude": float(lat),
+                    "longitude": float(lng),
+                    "clusterId": cluster_id,
+                    "locationId": location_id,
+                }
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry("get_sensor_geolocation", operation)
+        except Exception as e:
+            logger.error(f"Failed to get geolocation for sensor '{sensor_id}': {e}")
+            return None
+
+    # =========================================================================
+    # TASK 5.1 – Sensor Registry Methods
+    # =========================================================================
+
+    def get_sensor(self, sensor_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a single sensor record by SensorID.
+
+        Joins SENSOR_REGISTRY with LOCATIONS and SENSOR_CLUSTERS to return
+        a fully-enriched sensor dict.
+
+        Args:
+            sensor_id: Unique sensor identifier
+
+        Returns:
+            dict with sensor details, or None if not found
+
+        Validates: FR1.2, IR3.1
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT s.SensorID, s.LocationID, s.ClusterID,
+                           s.Latitude, s.Longitude, s.Altitude,
+                           s.SensorModel, s.FirmwareVersion, s.Status,
+                           s.InstallDate, s.LastMaintenance, s.NextMaintenance,
+                           s.RegisteredAt, s.UpdatedAt,
+                           l.Name  AS LocationName,
+                           l.Type  AS LocationType,
+                           c.ClusterName
+                    FROM   SENSOR_REGISTRY s
+                    JOIN   LOCATIONS       l ON l.LocationID = s.LocationID
+                    LEFT JOIN SENSOR_CLUSTERS c ON c.ClusterID = s.ClusterID
+                    WHERE  s.SensorID = :sensor_id
+                    """,
+                    {'sensor_id': sensor_id}
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    logger.debug(f"Sensor '{sensor_id}' not found")
+                    return None
+                cols = [d[0].lower() for d in cursor.description]
+                return dict(zip(cols, row))
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry("get_sensor", operation)
+        except Exception as e:
+            logger.error(f"Failed to get sensor '{sensor_id}': {e}")
+            return None
+
+    def get_sensors_by_location(self, location_id: str,
+                                status: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Retrieve all sensors belonging to a given location (ward/district/city).
+
+        Args:
+            location_id: Location identifier
+            status:      Optional status filter (Active, Offline, Maintenance, Decommissioned)
+
+        Returns:
+            List of sensor dicts ordered by RegisteredAt DESC
+
+        Validates: FR1.2, FR1.3, IR3.2
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                query = """
+                    SELECT s.SensorID, s.LocationID, s.ClusterID,
+                           s.Latitude, s.Longitude, s.Altitude,
+                           s.SensorModel, s.FirmwareVersion, s.Status,
+                           s.InstallDate, s.LastMaintenance, s.NextMaintenance,
+                           s.RegisteredAt, s.UpdatedAt,
+                           l.Name  AS LocationName,
+                           l.Type  AS LocationType,
+                           c.ClusterName
+                    FROM   SENSOR_REGISTRY s
+                    JOIN   LOCATIONS       l ON l.LocationID = s.LocationID
+                    LEFT JOIN SENSOR_CLUSTERS c ON c.ClusterID = s.ClusterID
+                    WHERE  s.LocationID = :location_id
+                """
+                params: Dict[str, Any] = {'location_id': location_id}
+                if status:
+                    query += " AND s.Status = :status"
+                    params['status'] = status
+                query += " ORDER BY s.RegisteredAt DESC"
+                cursor.execute(query, params)
+                cols = [d[0].lower() for d in cursor.description]
+                results = [dict(zip(cols, row)) for row in cursor]
+                logger.debug(
+                    f"Retrieved {len(results)} sensors for location '{location_id}'"
+                )
+                return results
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry("get_sensors_by_location", operation)
+        except Exception as e:
+            logger.error(f"Failed to get sensors for location '{location_id}': {e}")
+            return []
+
+    def get_sensors_by_cluster(self, cluster_id: str,
+                               status: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Retrieve all sensors belonging to a spatial cluster.
+
+        Args:
+            cluster_id: Cluster identifier
+            status:     Optional status filter
+
+        Returns:
+            List of sensor dicts
+
+        Validates: FR1.3, IR3.3
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                query = """
+                    SELECT s.SensorID, s.LocationID, s.ClusterID,
+                           s.Latitude, s.Longitude, s.Altitude,
+                           s.SensorModel, s.FirmwareVersion, s.Status,
+                           s.InstallDate, s.LastMaintenance, s.NextMaintenance,
+                           s.RegisteredAt, s.UpdatedAt,
+                           l.Name  AS LocationName,
+                           l.Type  AS LocationType,
+                           c.ClusterName
+                    FROM   SENSOR_REGISTRY  s
+                    JOIN   LOCATIONS        l ON l.LocationID = s.LocationID
+                    JOIN   SENSOR_CLUSTERS  c ON c.ClusterID = s.ClusterID
+                    WHERE  s.ClusterID = :cluster_id
+                """
+                params: Dict[str, Any] = {'cluster_id': cluster_id}
+                if status:
+                    query += " AND s.Status = :status"
+                    params['status'] = status
+                query += " ORDER BY s.RegisteredAt DESC"
+                cursor.execute(query, params)
+                cols = [d[0].lower() for d in cursor.description]
+                results = [dict(zip(cols, row)) for row in cursor]
+                logger.debug(
+                    f"Retrieved {len(results)} sensors for cluster '{cluster_id}'"
+                )
+                return results
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry("get_sensors_by_cluster", operation)
+        except Exception as e:
+            logger.error(f"Failed to get sensors for cluster '{cluster_id}': {e}")
+            return []
+
+    def get_sensor_capabilities(self, sensor_id: str) -> List[Dict[str, Any]]:
+        """
+        Retrieve all active capabilities for a sensor from SENSOR_CAPABILITIES.
+
+        Args:
+            sensor_id: Unique sensor identifier
+
+        Returns:
+            List of capability dicts (MetricType, Unit, range, accuracy, etc.)
+
+        Validates: FR1.2, IR3.4
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT CapabilityID, SensorID, MetricType, Unit,
+                           MinRange, MaxRange, Accuracy,
+                           CalibrationDate, NextCalibration, IsActive
+                    FROM   SENSOR_CAPABILITIES
+                    WHERE  SensorID = :sensor_id
+                    ORDER BY MetricType
+                    """,
+                    {'sensor_id': sensor_id}
+                )
+                cols = [d[0].lower() for d in cursor.description]
+                results = [dict(zip(cols, row)) for row in cursor]
+                logger.debug(
+                    f"Retrieved {len(results)} capabilities for sensor '{sensor_id}'"
+                )
+                return results
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry("get_sensor_capabilities", operation)
+        except Exception as e:
+            logger.error(
+                f"Failed to get capabilities for sensor '{sensor_id}': {e}"
+            )
+            return []
+
+    # =========================================================================
+    # TASK 5.2 – Location Hierarchy Methods
+    # =========================================================================
+
+    def get_location(self, location_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a single location record by LocationID.
+
+        Includes CenterLat/CenterLng, Area, Population, and HierarchyLevel
+        from the LOCATION_HIERARCHY view.
+
+        Args:
+            location_id: Location identifier
+
+        Returns:
+            dict with location details, or None if not found
+
+        Validates: FR1.1, FR8.1
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT l.LocationID, l.Name, l.ParentID, l.Type,
+                           l.CenterLat, l.CenterLng, l.Area, l.Population,
+                           l.CreatedAt, l.UpdatedAt,
+                           h.HierarchyLevel, h.Path
+                    FROM   LOCATIONS        l
+                    JOIN   LOCATION_HIERARCHY h ON h.LocationID = l.LocationID
+                    WHERE  l.LocationID = :location_id
+                    """,
+                    {'location_id': location_id}
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    logger.debug(f"Location '{location_id}' not found")
+                    return None
+                cols = [d[0].lower() for d in cursor.description]
+                return dict(zip(cols, row))
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry("get_location", operation)
+        except Exception as e:
+            logger.error(f"Failed to get location '{location_id}': {e}")
+            return None
+
+    def get_all_locations(self, location_type: Optional[str] = None,
+                          parent_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Retrieve all locations, optionally filtered by type or parent.
+
+        Args:
+            location_type: Optional filter – 'City', 'District', or 'Ward'
+            parent_id:     Optional parent location filter
+
+        Returns:
+            List of location dicts ordered by HierarchyLevel then LocationID
+
+        Validates: FR1.1, FR8.1
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                query = """
+                    SELECT l.LocationID, l.Name, l.ParentID, l.Type,
+                           l.CenterLat, l.CenterLng, l.Area, l.Population,
+                           l.CreatedAt, l.UpdatedAt,
+                           h.HierarchyLevel, h.Path
+                    FROM   LOCATIONS        l
+                    JOIN   LOCATION_HIERARCHY h ON h.LocationID = l.LocationID
+                    WHERE  1 = 1
+                """
+                params: Dict[str, Any] = {}
+                if location_type:
+                    query += " AND l.Type = :loc_type"
+                    params['loc_type'] = location_type
+                if parent_id:
+                    query += " AND l.ParentID = :parent_id"
+                    params['parent_id'] = parent_id
+                query += " ORDER BY h.HierarchyLevel, l.LocationID"
+                cursor.execute(query, params)
+                cols = [d[0].lower() for d in cursor.description]
+                results = [dict(zip(cols, row)) for row in cursor]
+                logger.debug(f"Retrieved {len(results)} locations")
+                return results
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry("get_all_locations", operation)
+        except Exception as e:
+            logger.error(f"Failed to get all locations: {e}")
+            return []
+
+    # get_location_hierarchy() already exists above (lines ~267-331).
+    # The existing implementation supports both full-tree (no arg) and
+    # subtree-rooted-at (location_id) queries via LOCATION_HIERARCHY view /
+    # recursive CTE.  No changes required.
+
+    # =========================================================================
+    # TASK 5.3 – Cluster Methods
+    # =========================================================================
+
+    def get_cluster(self, cluster_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a single cluster record by ClusterID.
+
+        Args:
+            cluster_id: Cluster identifier
+
+        Returns:
+            dict with cluster details, or None if not found
+
+        Validates: FR1.4, FR8.2
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT c.ClusterID, c.LocationID, c.ClusterName,
+                           c.CenterLat, c.CenterLng, c.Radius,
+                           c.SensorCount, c.Algorithm,
+                           c.CreatedAt, c.UpdatedAt,
+                           l.Name AS LocationName, l.Type AS LocationType
+                    FROM   SENSOR_CLUSTERS c
+                    JOIN   LOCATIONS       l ON l.LocationID = c.LocationID
+                    WHERE  c.ClusterID = :cluster_id
+                    """,
+                    {'cluster_id': cluster_id}
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    logger.debug(f"Cluster '{cluster_id}' not found")
+                    return None
+                cols = [d[0].lower() for d in cursor.description]
+                return dict(zip(cols, row))
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry("get_cluster", operation)
+        except Exception as e:
+            logger.error(f"Failed to get cluster '{cluster_id}': {e}")
+            return None
+
+    def get_all_clusters(self, location_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Retrieve all sensor clusters, optionally filtered by location.
+
+        Args:
+            location_id: Optional location filter
+
+        Returns:
+            List of cluster dicts ordered by LocationID, ClusterID
+
+        Validates: FR1.4, FR8.2
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                query = """
+                    SELECT c.ClusterID, c.LocationID, c.ClusterName,
+                           c.CenterLat, c.CenterLng, c.Radius,
+                           c.SensorCount, c.Algorithm,
+                           c.CreatedAt, c.UpdatedAt,
+                           l.Name AS LocationName, l.Type AS LocationType
+                    FROM   SENSOR_CLUSTERS c
+                    JOIN   LOCATIONS       l ON l.LocationID = c.LocationID
+                    WHERE  1 = 1
+                """
+                params: Dict[str, Any] = {}
+                if location_id:
+                    query += " AND c.LocationID = :location_id"
+                    params['location_id'] = location_id
+                query += " ORDER BY c.LocationID, c.ClusterID"
+                cursor.execute(query, params)
+                cols = [d[0].lower() for d in cursor.description]
+                results = [dict(zip(cols, row)) for row in cursor]
+                logger.debug(f"Retrieved {len(results)} clusters")
+                return results
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry("get_all_clusters", operation)
+        except Exception as e:
+            logger.error(f"Failed to get all clusters: {e}")
+            return []
+
+    def update_cluster_sensor_count(self, cluster_id: str) -> bool:
+        """
+        Recompute and persist the SensorCount for a cluster by counting
+        Active sensors currently assigned to it in SENSOR_REGISTRY.
+
+        This is a manual reconciliation helper that complements the DB
+        trigger (trg_cluster_count) which fires on INSERT/DELETE.
+
+        Args:
+            cluster_id: Cluster identifier to update
+
+        Returns:
+            bool: True if updated successfully, False otherwise
+
+        Validates: FR1.4, FR8.2
+        """
+        def operation(connection):
+            cursor = connection.cursor()
+            try:
+                cursor.execute(
+                    """
+                    UPDATE SENSOR_CLUSTERS
+                    SET    SensorCount = (
+                               SELECT COUNT(*)
+                               FROM   SENSOR_REGISTRY
+                               WHERE  ClusterID = :cluster_id
+                               AND    Status    = 'Active'
+                           ),
+                           UpdatedAt = CURRENT_TIMESTAMP
+                    WHERE  ClusterID = :cluster_id
+                    """,
+                    {'cluster_id': cluster_id}
+                )
+                rows_updated = cursor.rowcount
+                connection.commit()
+                if rows_updated == 0:
+                    logger.warning(
+                        f"update_cluster_sensor_count: cluster '{cluster_id}' not found"
+                    )
+                    return False
+                logger.debug(
+                    f"Updated SensorCount for cluster '{cluster_id}'"
+                )
+                return True
+            except oracledb.DatabaseError as e:
+                connection.rollback()
+                logger.error(
+                    f"Failed to update sensor count for cluster "
+                    f"'{cluster_id}': {e}"
+                )
+                return False
+            finally:
+                cursor.close()
+
+        try:
+            return self._execute_with_retry("update_cluster_sensor_count", operation)
+        except Exception:
+            return False
+
     def close(self):
         """Close Oracle connection pool and release resources."""
         if self._pool:
