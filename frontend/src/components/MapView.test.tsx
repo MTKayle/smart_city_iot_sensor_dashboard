@@ -46,6 +46,52 @@ vi.mock('maplibre-gl', () => ({
   },
 }));
 
+/** Helper to create v2-compatible Telemetry */
+const makeTelemetry = (overrides: {
+  sensorId: string;
+  locationId: string;
+  co2: number;
+  noise: number;
+  temperature: number;
+  timestamp: string;
+}): Telemetry => ({
+  sensorId: overrides.sensorId,
+  locationId: overrides.locationId,
+  data: {
+    co2: overrides.co2,
+    noise: overrides.noise,
+    temperature: overrides.temperature,
+    pm25: null,
+    humidity: null,
+  },
+  location: { type: 'Point', coordinates: [106.7, 10.78] },
+  timestamp: overrides.timestamp,
+  co2: overrides.co2,
+  noise: overrides.noise,
+  temperature: overrides.temperature,
+});
+
+/** Helper to create v2-compatible Alert */
+const makeAlert = (overrides: {
+  alertId: string;
+  sensorId: string;
+  metricType: string;
+  value: number;
+  level: 'LOW' | 'MEDIUM' | 'HIGH';
+  createdAt: string;
+}): Alert => ({
+  alertId: overrides.alertId,
+  sensorId: overrides.sensorId,
+  locationId: 'loc-1',
+  alertType: 'THRESHOLD',
+  metricType: overrides.metricType,
+  value: overrides.value,
+  severity: overrides.level,
+  status: 'OPEN',
+  createdAt: overrides.createdAt,
+  level: overrides.level,
+});
+
 describe('MapView Component', () => {
   const mockSensors: Sensor[] = [
     {
@@ -78,33 +124,33 @@ describe('MapView Component', () => {
   ];
 
   const mockAlerts: Alert[] = [
-    {
+    makeAlert({
       alertId: 'alert-1',
       sensorId: 'sensor-1',
       metricType: 'CO2',
       value: 1200,
       level: 'HIGH',
       createdAt: '2024-01-01T12:00:00Z',
-    },
+    }),
   ];
 
   const mockTelemetry: Record<string, Telemetry> = {
-    'sensor-1': {
+    'sensor-1': makeTelemetry({
       sensorId: 'sensor-1',
       locationId: 'loc-1',
       co2: 1200,
       noise: 65,
       temperature: 25,
       timestamp: '2024-01-01T12:00:00Z',
-    },
-    'sensor-2': {
+    }),
+    'sensor-2': makeTelemetry({
       sensorId: 'sensor-2',
       locationId: 'loc-2',
       co2: 400,
       noise: 55,
       temperature: 23,
       timestamp: '2024-01-01T12:00:00Z',
-    },
+    }),
   };
 
   beforeEach(() => {

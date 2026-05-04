@@ -1,10 +1,10 @@
 /**
- * API Client Service for Smart City IoT Dashboard
+ * API Client Service for Smart City IoT Dashboard (v2)
  * 
- * This module provides functions to interact with the backend REST API.
- * Uses axios for HTTP requests with error handling and response validation.
- * 
- * Requirements: 9.1, 9.2, 9.3, 9.4
+ * Provides functions to interact with the backend REST API.
+ * Covers locations, clusters, sensor registry, telemetry, alerts, analytics, and leaderboard.
+ *
+ * Requirements: FR8.1, FR8.2, FR8.3, FR8.4, FR8.5, FR8.6
  */
 
 import axios, { AxiosError } from 'axios';
@@ -12,24 +12,25 @@ import type { AxiosInstance } from 'axios';
 import type {
   Location,
   Sensor,
+  SensorCluster,
+  SensorRegistry,
+  SensorCapability,
   Telemetry,
   Alert,
   Analytics,
+  ClusterAnalytics,
   LeaderboardEntry,
 } from '../types';
 
-/**
- * API Error class for structured error handling
- */
+// ============================================================================
+// API Error
+// ============================================================================
+
 export class ApiError extends Error {
   statusCode?: number;
   details?: unknown;
 
-  constructor(
-    message: string,
-    statusCode?: number,
-    details?: unknown
-  ) {
+  constructor(message: string, statusCode?: number, details?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.statusCode = statusCode;
@@ -37,261 +38,453 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Get base URL from environment variable or default to localhost
- */
-const getBaseUrl = (): string => {
-  // Vite uses import.meta.env for environment variables
-  return import.meta.env.VITE_API_URL || 'http://localhost:8000';
-};
+// ============================================================================
+// Axios Client
+// ============================================================================
 
-/**
- * Create axios instance with base configuration
- */
+const getBaseUrl = (): string =>
+  import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 const createApiClient = (): AxiosInstance => {
   const client = axios.create({
     baseURL: getBaseUrl(),
-    timeout: 30000, // 30 second timeout
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    timeout: 30000,
+    headers: { 'Content-Type': 'application/json' },
   });
 
-  // Response interceptor for error handling
   client.interceptors.response.use(
     (response) => response,
     (error: AxiosError) => {
       if (error.response) {
-        // Server responded with error status
         const statusCode = error.response.status;
-        const message = (error.response.data as { detail?: string })?.detail || error.message;
+        const message =
+          (error.response.data as { detail?: string })?.detail || error.message;
         throw new ApiError(message, statusCode, error.response.data);
       } else if (error.request) {
-        // Request made but no response received
-        throw new ApiError('No response from server. Please check your connection.', undefined, error);
+        throw new ApiError(
+          'No response from server. Please check your connection.',
+          undefined,
+          error,
+        );
       } else {
-        // Error setting up the request
         throw new ApiError(error.message, undefined, error);
       }
-    }
+    },
   );
 
   return client;
 };
 
-// Create singleton API client instance
 const apiClient = createApiClient();
+
+// ============================================================================
+// Location API
+// ============================================================================
 
 /**
  * Fetch all locations in the hierarchy.
- * 
- * Retrieves the complete location hierarchy (City > District > Ward)
- * with parent-child relationships.
- * 
- * @returns Promise<Location[]> - Array of all locations
- * @throws ApiError - If request fails
- * 
- * Validates: Requirements 9.1, 1.3
  */
 export const fetchLocations = async (): Promise<Location[]> => {
   try {
     const response = await apiClient.get<Location[]>('/api/locations');
     return response.data;
   } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
+    if (error instanceof ApiError) throw error;
     throw new ApiError('Failed to fetch locations', undefined, error);
   }
 };
 
 /**
- * Fetch all registered sensors with location information.
- * 
- * Retrieves sensors with their location hierarchy information.
- * Optionally filters by location ID.
- * 
- * @param locationId - Optional location filter
- * @returns Promise<Sensor[]> - Array of registered sensors
- * @throws ApiError - If request fails
- * 
- * Validates: Requirements 9.2, 2.4
+ * Fetch a single location by ID.
  */
-export const fetchSensors = async (locationId?: string): Promise<Sensor[]> => {
+export const fetchLocation = async (locationId: string): Promise<Location> => {
+  try {
+    const response = await apiClient.get<Location>(
+      `/api/locations/${locationId}`,
+    );
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      `Failed to fetch location ${locationId}`,
+      undefined,
+      error,
+    );
+  }
+};
+
+/**
+ * Fetch full hierarchy for a location (parent chain + children).
+ */
+export const fetchLocationHierarchy = async (
+  locationId: string,
+): Promise<Location[]> => {
+  try {
+    const response = await apiClient.get<Location[]>(
+      `/api/locations/${locationId}/hierarchy`,
+    );
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      `Failed to fetch location hierarchy for ${locationId}`,
+      undefined,
+      error,
+    );
+  }
+};
+
+/**
+ * Fetch sensors registered under a location.
+ */
+export const fetchLocationSensors = async (
+  locationId: string,
+): Promise<SensorRegistry[]> => {
+  try {
+    const response = await apiClient.get<SensorRegistry[]>(
+      `/api/locations/${locationId}/sensors`,
+    );
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      `Failed to fetch sensors for location ${locationId}`,
+      undefined,
+      error,
+    );
+  }
+};
+
+// ============================================================================
+// Cluster API
+// ============================================================================
+
+/**
+ * Fetch all clusters.
+ */
+export const fetchClusters = async (): Promise<SensorCluster[]> => {
+  try {
+    const response = await apiClient.get<SensorCluster[]>('/api/clusters');
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError('Failed to fetch clusters', undefined, error);
+  }
+};
+
+/**
+ * Fetch a single cluster by ID.
+ */
+export const fetchCluster = async (
+  clusterId: string,
+): Promise<SensorCluster> => {
+  try {
+    const response = await apiClient.get<SensorCluster>(
+      `/api/clusters/${clusterId}`,
+    );
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      `Failed to fetch cluster ${clusterId}`,
+      undefined,
+      error,
+    );
+  }
+};
+
+/**
+ * Fetch sensors in a cluster.
+ */
+export const fetchClusterSensors = async (
+  clusterId: string,
+): Promise<SensorRegistry[]> => {
+  try {
+    const response = await apiClient.get<SensorRegistry[]>(
+      `/api/clusters/${clusterId}/sensors`,
+    );
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      `Failed to fetch sensors for cluster ${clusterId}`,
+      undefined,
+      error,
+    );
+  }
+};
+
+/**
+ * Fetch cluster-level aggregated telemetry/analytics.
+ */
+export const fetchClusterTelemetry = async (
+  clusterId: string,
+): Promise<ClusterAnalytics> => {
+  try {
+    const response = await apiClient.get<ClusterAnalytics>(
+      `/api/clusters/${clusterId}/telemetry`,
+    );
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      `Failed to fetch cluster telemetry for ${clusterId}`,
+      undefined,
+      error,
+    );
+  }
+};
+
+/**
+ * Detect pollution hotspots across clusters.
+ */
+export const fetchClusterHotspots = async (): Promise<ClusterAnalytics[]> => {
+  try {
+    const response = await apiClient.get<ClusterAnalytics[]>(
+      '/api/clusters/hotspots',
+    );
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError('Failed to fetch cluster hotspots', undefined, error);
+  }
+};
+
+// ============================================================================
+// Sensor Registry API
+// ============================================================================
+
+/**
+ * Fetch all registered sensors (legacy + v2 compatible).
+ */
+export const fetchSensors = async (
+  locationId?: string,
+): Promise<Sensor[]> => {
   try {
     const params = locationId ? { location_id: locationId } : {};
     const response = await apiClient.get<Sensor[]>('/api/sensors', { params });
     return response.data;
   } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
+    if (error instanceof ApiError) throw error;
     throw new ApiError('Failed to fetch sensors', undefined, error);
   }
 };
 
 /**
- * Telemetry query parameters
+ * Fetch v2 sensor registry entries.
  */
+export const fetchSensorRegistry = async (
+  locationId?: string,
+): Promise<SensorRegistry[]> => {
+  try {
+    const params = locationId ? { location_id: locationId } : {};
+    const response = await apiClient.get<SensorRegistry[]>('/api/sensors', {
+      params,
+    });
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError('Failed to fetch sensor registry', undefined, error);
+  }
+};
+
+/**
+ * Fetch a single sensor by ID.
+ */
+export const fetchSensorById = async (
+  sensorId: string,
+): Promise<SensorRegistry> => {
+  try {
+    const response = await apiClient.get<SensorRegistry>(
+      `/api/sensors/${sensorId}`,
+    );
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      `Failed to fetch sensor ${sensorId}`,
+      undefined,
+      error,
+    );
+  }
+};
+
+/**
+ * Fetch sensor capabilities (metric types it can measure).
+ */
+export const fetchSensorCapabilities = async (
+  sensorId: string,
+): Promise<SensorCapability[]> => {
+  try {
+    const response = await apiClient.get<SensorCapability[]>(
+      `/api/sensors/${sensorId}/capabilities`,
+    );
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      `Failed to fetch capabilities for sensor ${sensorId}`,
+      undefined,
+      error,
+    );
+  }
+};
+
+/**
+ * Find nearby sensors by GPS coordinates.
+ */
+export const fetchNearbySensors = async (
+  lat: number,
+  lng: number,
+  radiusMeters?: number,
+): Promise<SensorRegistry[]> => {
+  try {
+    const params: Record<string, number> = { lat, lng };
+    if (radiusMeters) params.radius = radiusMeters;
+    const response = await apiClient.get<SensorRegistry[]>(
+      '/api/sensors/nearby',
+      { params },
+    );
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError('Failed to fetch nearby sensors', undefined, error);
+  }
+};
+
+// ============================================================================
+// Telemetry API
+// ============================================================================
+
 export interface TelemetryQueryParams {
-  startTime?: string; // ISO 8601 format
-  endTime?: string; // ISO 8601 format
-  limit?: number; // Max records to return (default: 100, max: 1000)
+  startTime?: string;
+  endTime?: string;
+  limit?: number;
 }
 
 /**
  * Fetch telemetry data for a specific sensor.
- * 
- * Retrieves telemetry data with optional time range filter.
- * Defaults to last 24 hours if no time range specified.
- * 
- * @param sensorId - Sensor identifier
- * @param params - Optional query parameters (time range, limit)
- * @returns Promise<Telemetry[]> - Array of telemetry records ordered by timestamp descending
- * @throws ApiError - If request fails or parameters are invalid
- * 
- * Validates: Requirement 9.3
  */
 export const fetchTelemetry = async (
   sensorId: string,
-  params?: TelemetryQueryParams
+  params?: TelemetryQueryParams,
 ): Promise<Telemetry[]> => {
   try {
     const queryParams: Record<string, string | number> = {};
-    
-    if (params?.startTime) {
-      queryParams.start_time = params.startTime;
-    }
-    if (params?.endTime) {
-      queryParams.end_time = params.endTime;
-    }
-    if (params?.limit) {
-      queryParams.limit = params.limit;
-    }
+    if (params?.startTime) queryParams.start_time = params.startTime;
+    if (params?.endTime) queryParams.end_time = params.endTime;
+    if (params?.limit) queryParams.limit = params.limit;
 
     const response = await apiClient.get<Telemetry[]>(
       `/api/telemetry/${sensorId}`,
-      { params: queryParams }
+      { params: queryParams },
     );
     return response.data;
   } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
-    throw new ApiError(`Failed to fetch telemetry for sensor ${sensorId}`, undefined, error);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      `Failed to fetch telemetry for sensor ${sensorId}`,
+      undefined,
+      error,
+    );
   }
 };
 
+// ============================================================================
+// Analytics API
+// ============================================================================
+
 /**
- * Fetch analytics (moving averages) for a specific sensor.
- * 
- * Retrieves moving averages for the last 10 telemetry readings
- * for CO2, Noise, and Temperature metrics.
- * 
- * @param sensorId - Sensor identifier
- * @returns Promise<Analytics> - Analytics data with moving averages
- * @throws ApiError - If request fails or sensor has no data
- * 
- * Validates: Requirement 7.4
+ * Fetch analytics (moving averages + AQI) for a specific sensor.
  */
 export const fetchAnalytics = async (sensorId: string): Promise<Analytics> => {
   try {
     const response = await apiClient.get<Analytics>(
-      `/api/sensors/${sensorId}/analytics`
+      `/api/sensors/${sensorId}/analytics`,
     );
     return response.data;
   } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
-    throw new ApiError(`Failed to fetch analytics for sensor ${sensorId}`, undefined, error);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      `Failed to fetch analytics for sensor ${sensorId}`,
+      undefined,
+      error,
+    );
   }
 };
 
-/**
- * Alert query parameters
- */
+// ============================================================================
+// Alert API
+// ============================================================================
+
 export interface AlertQueryParams {
-  level?: 'LOW' | 'MEDIUM' | 'HIGH'; // Alert level filter
-  locationId?: string; // Location ID filter
-  limit?: number; // Max alerts to return (default: 100, max: 1000)
+  level?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  alertType?: 'THRESHOLD' | 'PREDICTIVE' | 'ANOMALY' | 'CLUSTER';
+  locationId?: string;
+  limit?: number;
 }
 
 /**
  * Fetch recent alerts with optional filters.
- * 
- * Retrieves alerts ordered by creation time descending.
- * Supports filtering by alert level and location.
- * 
- * @param params - Optional query parameters (level, location, limit)
- * @returns Promise<Alert[]> - Array of recent alerts
- * @throws ApiError - If request fails or parameters are invalid
- * 
- * Validates: Requirement 9.4
  */
-export const fetchAlerts = async (params?: AlertQueryParams): Promise<Alert[]> => {
+export const fetchAlerts = async (
+  params?: AlertQueryParams,
+): Promise<Alert[]> => {
   try {
     const queryParams: Record<string, string | number> = {};
-    
-    if (params?.level) {
-      queryParams.level = params.level;
-    }
-    if (params?.locationId) {
-      queryParams.location_id = params.locationId;
-    }
-    if (params?.limit) {
-      queryParams.limit = params.limit;
-    }
+    if (params?.level) queryParams.level = params.level;
+    if (params?.alertType) queryParams.alert_type = params.alertType;
+    if (params?.locationId) queryParams.location_id = params.locationId;
+    if (params?.limit) queryParams.limit = params.limit;
 
-    const response = await apiClient.get<Alert[]>('/api/alerts', { params: queryParams });
+    const response = await apiClient.get<Alert[]>('/api/alerts', {
+      params: queryParams,
+    });
     return response.data;
   } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
+    if (error instanceof ApiError) throw error;
     throw new ApiError('Failed to fetch alerts', undefined, error);
   }
 };
 
+// ============================================================================
+// Leaderboard API
+// ============================================================================
+
 /**
  * Fetch leaderboard of locations ranked by environmental quality.
- * 
- * Retrieves locations ordered by Clean Score descending
- * (highest score = cleanest location).
- * 
- * @param limit - Maximum number of entries to return (default: 100, max: 1000)
- * @returns Promise<LeaderboardEntry[]> - Array of leaderboard entries with rank numbers
- * @throws ApiError - If request fails
- * 
- * Validates: Requirement 8.4
  */
-export const fetchLeaderboard = async (limit?: number): Promise<LeaderboardEntry[]> => {
+export const fetchLeaderboard = async (
+  limit?: number,
+): Promise<LeaderboardEntry[]> => {
   try {
     const params = limit ? { limit } : {};
-    const response = await apiClient.get<LeaderboardEntry[]>('/api/leaderboard', { params });
+    const response = await apiClient.get<LeaderboardEntry[]>(
+      '/api/leaderboard',
+      { params },
+    );
     return response.data;
   } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
+    if (error instanceof ApiError) throw error;
     throw new ApiError('Failed to fetch leaderboard', undefined, error);
   }
 };
 
-/**
- * Health check endpoint to verify API connectivity.
- * 
- * @returns Promise<{ status: string; service: string }> - Health status
- * @throws ApiError - If request fails
- */
-export const checkHealth = async (): Promise<{ status: string; service: string }> => {
+// ============================================================================
+// Health Check
+// ============================================================================
+
+export const checkHealth = async (): Promise<{
+  status: string;
+  service: string;
+}> => {
   try {
-    const response = await apiClient.get<{ status: string; service: string }>('/api/health');
+    const response = await apiClient.get<{ status: string; service: string }>(
+      '/api/health',
+    );
     return response.data;
   } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
+    if (error instanceof ApiError) throw error;
     throw new ApiError('Failed to check API health', undefined, error);
   }
 };

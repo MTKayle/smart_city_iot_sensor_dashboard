@@ -1,0 +1,21 @@
+SET PAGESIZE 50;
+SET LINESIZE 200;
+
+SELECT COUNT(*) as TotalSensors FROM SENSOR_REGISTRY;
+
+SELECT LocationID, COUNT(*) as SensorCount 
+FROM SENSOR_REGISTRY 
+GROUP BY LocationID 
+ORDER BY LocationID;
+
+SELECT Type, COUNT(*) as Count 
+FROM LOCATIONS 
+GROUP BY Type 
+ORDER BY Type;
+
+SELECT LocationID, Name, Type 
+FROM LOCATIONS 
+WHERE Type='District' 
+ORDER BY LocationID;
+
+EXIT;
