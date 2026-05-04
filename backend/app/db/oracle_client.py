@@ -545,58 +545,91 @@ class OracleClient:
         avg_co2: float,
         avg_noise: float,
         avg_temperature: float,
-        clean_score: float
+        clean_score: float,
+        avg_pm25: Optional[float] = None,
+        avg_humidity: Optional[float] = None,
+        aqi: Optional[int] = None,
+        data_points: int = 0,
+        granularity: str = 'DAILY',
     ) -> bool:
         """
-        Insert or update daily telemetry summary in TELEMETRY_SUMMARY table.
+        Insert or update daily telemetry summary in TELEMETRY_SUMMARY table (v2 schema).
         
-        Uses MERGE statement to insert new record or update existing one based on
-        unique constraint (LocationID, Date). This ensures only one summary per
-        location per day.
+        Uses MERGE statement keyed on (LocationID, TimeBucket, Granularity) so that
+        repeated runs for the same date/granularity upsert rather than duplicate.
         
         Args:
             summary_id: Unique identifier for the summary
             location_id: Location identifier
-            summary_date: Date for the summary
+            summary_date: Date for the summary (converted to TimeBucket timestamp)
             avg_co2: Average CO2 level in ppm
             avg_noise: Average noise level in dB
             avg_temperature: Average temperature in °C
             clean_score: Calculated Clean Score (0-100)
+            avg_pm25: Average PM2.5 in µg/m³ (optional)
+            avg_humidity: Average humidity in % (optional)
+            aqi: Air Quality Index (optional)
+            data_points: Number of data points aggregated (default 0)
+            granularity: Aggregation granularity - 'HOURLY' or 'DAILY' (default 'DAILY')
         
         Returns:
             bool: True if operation successful, False otherwise
         
-        Validates: Requirement 8.3
+        Validates: Requirement 8.3, FR6.2, FR6.4
         """
         def operation(connection):
             cursor = connection.cursor()
             try:
-                # Use MERGE to insert or update based on unique constraint
+                # Convert date to timestamp for TimeBucket
+                time_bucket = datetime.combine(summary_date, datetime.min.time())
+
                 cursor.execute(
                     """
                     MERGE INTO TELEMETRY_SUMMARY ts
                     USING (
-                        SELECT :location_id as LocationID, :summary_date as SummaryDate FROM DUAL
+                        SELECT :location_id  AS LocationID,
+                               :time_bucket  AS TimeBucket,
+                               :granularity  AS Granularity
+                        FROM DUAL
                     ) src
-                    ON (ts.LocationID = src.LocationID AND ts.SummaryDate = src.SummaryDate)
+                    ON (    ts.LocationID  = src.LocationID
+                        AND ts.TimeBucket  = src.TimeBucket
+                        AND ts.Granularity = src.Granularity
+                        AND ts.SensorID    IS NULL
+                        AND ts.ClusterID   IS NULL)
                     WHEN MATCHED THEN
                         UPDATE SET
-                            AvgCO2 = :avg_co2,
-                            AvgNoise = :avg_noise,
+                            AvgCO2         = :avg_co2,
+                            AvgNoise       = :avg_noise,
                             AvgTemperature = :avg_temperature,
-                            CleanScore = :clean_score
+                            AvgPM25        = :avg_pm25,
+                            AvgHumidity    = :avg_humidity,
+                            CleanScore     = :clean_score,
+                            AQI            = :aqi,
+                            DataPoints     = :data_points
                     WHEN NOT MATCHED THEN
-                        INSERT (SummaryID, LocationID, SummaryDate, AvgCO2, AvgNoise, AvgTemperature, CleanScore)
-                        VALUES (:summary_id, :location_id, :summary_date, :avg_co2, :avg_noise, :avg_temperature, :clean_score)
+                        INSERT (SummaryID, LocationID, TimeBucket, Granularity,
+                                AvgCO2, AvgNoise, AvgTemperature,
+                                AvgPM25, AvgHumidity,
+                                CleanScore, AQI, DataPoints)
+                        VALUES (:summary_id, :location_id, :time_bucket, :granularity,
+                                :avg_co2, :avg_noise, :avg_temperature,
+                                :avg_pm25, :avg_humidity,
+                                :clean_score, :aqi, :data_points)
                     """,
                     {
                         'summary_id': summary_id,
                         'location_id': location_id,
-                        'summary_date': summary_date,
+                        'time_bucket': time_bucket,
+                        'granularity': granularity,
                         'avg_co2': avg_co2,
                         'avg_noise': avg_noise,
                         'avg_temperature': avg_temperature,
-                        'clean_score': clean_score
+                        'avg_pm25': avg_pm25,
+                        'avg_humidity': avg_humidity,
+                        'clean_score': clean_score,
+                        'aqi': aqi,
+                        'data_points': data_points,
                     }
                 )
                 connection.commit()
@@ -641,10 +674,16 @@ class OracleClient:
                             ts.AvgCO2,
                             ts.AvgNoise,
                             ts.AvgTemperature,
+                            ts.AvgPM25,
+                            ts.AvgHumidity,
                             ts.CleanScore,
-                            ts.SummaryDate,
-                            ROW_NUMBER() OVER (PARTITION BY ts.LocationID ORDER BY ts.SummaryDate DESC) as rn
+                            ts.AQI,
+                            ts.TimeBucket,
+                            ROW_NUMBER() OVER (PARTITION BY ts.LocationID ORDER BY ts.TimeBucket DESC) as rn
                         FROM TELEMETRY_SUMMARY ts
+                        WHERE ts.LocationID IS NOT NULL
+                          AND ts.SensorID   IS NULL
+                          AND ts.ClusterID  IS NULL
                     )
                     SELECT 
                         ls.LocationID,
@@ -652,7 +691,10 @@ class OracleClient:
                         ls.AvgCO2,
                         ls.AvgNoise,
                         ls.AvgTemperature,
+                        ls.AvgPM25,
+                        ls.AvgHumidity,
                         ls.CleanScore,
+                        ls.AQI,
                         ROW_NUMBER() OVER (ORDER BY ls.CleanScore DESC) as Rank
                     FROM latest_summaries ls
                     INNER JOIN LOCATIONS l ON ls.LocationID = l.LocationID

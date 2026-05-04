@@ -59,17 +59,30 @@ class TestSensorSimulator:
         # Verify all required fields are present
         assert "sensorId" in telemetry
         assert "locationId" in telemetry
-        assert "co2" in telemetry
-        assert "noise" in telemetry
-        assert "temperature" in telemetry
+        assert "data" in telemetry
+        assert "location" in telemetry
+        assert "quality" in telemetry
         assert "timestamp" in telemetry
+        
+        # Verify nested data fields
+        data = telemetry["data"]
+        assert "co2" in data
+        assert "noise" in data
+        assert "temperature" in data
+        assert "pm25" in data
+        assert "humidity" in data
+        
+        # Verify quality fields
+        assert "batteryLevel" in telemetry["quality"]
+        assert "signalStrength" in telemetry["quality"]
         
         # Verify field types
         assert isinstance(telemetry["sensorId"], str)
         assert isinstance(telemetry["locationId"], str)
-        assert isinstance(telemetry["co2"], (int, float))
-        assert isinstance(telemetry["noise"], (int, float))
-        assert isinstance(telemetry["temperature"], (int, float))
+        assert isinstance(data["co2"], (int, float))
+        assert isinstance(data["noise"], (int, float))
+        assert isinstance(data["temperature"], (int, float))
+        assert isinstance(data["pm25"], (int, float))
         assert isinstance(telemetry["timestamp"], str)
     
     def test_generate_telemetry_value_ranges(self):
@@ -83,15 +96,19 @@ class TestSensorSimulator:
         # Generate multiple samples to test ranges
         for _ in range(100):
             telemetry = simulator.generate_telemetry("sensor_001")
+            data = telemetry["data"]
+            quality = telemetry["quality"]
             
-            # Verify CO2 range (300-2000 ppm)
-            assert 300 <= telemetry["co2"] <= 2000, f"CO2 {telemetry['co2']} out of range"
+            # Verify data ranges
+            assert 300 <= data["co2"] <= 2000, f"CO2 {data['co2']} out of range"
+            assert 30 <= data["noise"] <= 100, f"Noise {data['noise']} out of range"
+            assert 15 <= data["temperature"] <= 35, f"Temperature {data['temperature']} out of range"
+            assert 20 <= data["pm25"] <= 60, f"PM2.5 {data['pm25']} out of range"
+            assert 60 <= data["humidity"] <= 85, f"Humidity {data['humidity']} out of range"
             
-            # Verify Noise range (30-100 dB)
-            assert 30 <= telemetry["noise"] <= 100, f"Noise {telemetry['noise']} out of range"
-            
-            # Verify Temperature range (15-35°C)
-            assert 15 <= telemetry["temperature"] <= 35, f"Temperature {telemetry['temperature']} out of range"
+            # Verify quality ranges
+            assert 70 <= quality["batteryLevel"] <= 100, f"Battery {quality['batteryLevel']} out of range"
+            assert -60 <= quality["signalStrength"] <= -30, f"Signal {quality['signalStrength']} out of range"
     
     def test_generate_telemetry_sensor_id(self):
         """Test that generated telemetry contains correct sensor ID."""
@@ -145,7 +162,7 @@ class TestSensorSimulator:
         # Should be able to parse back
         parsed = json.loads(json_str)
         assert parsed["sensorId"] == telemetry["sensorId"]
-        assert parsed["co2"] == telemetry["co2"]
+        assert parsed["data"]["co2"] == telemetry["data"]["co2"]
     
     def test_retry_delay_initialization(self):
         """Test that retry delay is initialized correctly."""
@@ -160,7 +177,7 @@ class TestSensorSimulator:
     
     def test_multiple_sensors(self):
         """Test simulator with multiple sensors."""
-        sensor_ids = ["sensor_001", "sensor_002", "sensor_003", "sensor_004", "sensor_005"]
+        sensor_ids = ["sen_q1_ben_nghe_01", "sen_q1_ben_nghe_02"]
         simulator = SensorSimulator(
             broker_host="localhost",
             broker_port=1883,
@@ -171,7 +188,7 @@ class TestSensorSimulator:
         for sensor_id in sensor_ids:
             telemetry = simulator.generate_telemetry(sensor_id)
             assert telemetry["sensorId"] == sensor_id
-            assert telemetry["locationId"] in [f"ward_{i:03d}" for i in range(1, 6)]
+            assert telemetry["locationId"] == "ward_q1_ben_nghe"
 
 
 if __name__ == "__main__":

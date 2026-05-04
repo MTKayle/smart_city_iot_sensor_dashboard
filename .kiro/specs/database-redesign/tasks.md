@@ -152,22 +152,22 @@ This task list implements the production database redesign for the Smart City Io
     - _Requirements: FR1.4, FR8.2_
 
 
-- [ ] 6. Implement Alert Service Enhancements
-  - [ ] 6.1 Update threshold alert checking
+- [x] 6. Implement Alert Service Enhancements
+  - [x] 6.1 Update threshold alert checking
     - Update `check_threshold_alerts()` for PM2.5 and humidity
     - Add configurable thresholds
     - Add severity calculation based on exceedance percentage
     - Test with threshold-exceeding values
     - _Requirements: FR5.1, FR10.1, FR10.2_
   
-  - [ ] 6.2 Implement alert deduplication
+  - [x] 6.2 Implement alert deduplication
     - Add deduplication logic (5-minute window)
     - Query recent alerts before creating new one
     - Skip duplicate alerts
     - Test deduplication with multiple violations
     - _Requirements: FR5.4_
   
-  - [ ] 6.3 Implement predictive alerts
+  - [x] 6.3 Implement predictive alerts
     - Create `check_predictive_alerts()` function
     - Query last 20 telemetry readings
     - Implement linear regression using scikit-learn
@@ -178,7 +178,7 @@ This task list implements the production database redesign for the Smart City Io
     - Test with trending data
     - _Requirements: FR5.2, FR3.5_
   
-  - [ ] 6.4 Implement anomaly detection
+  - [x] 6.4 Implement anomaly detection
     - Create `detect_anomalies()` function
     - Query last 100 telemetry readings (24 hours)
     - Calculate mean and standard deviation
@@ -188,7 +188,7 @@ This task list implements the production database redesign for the Smart City Io
     - Test with anomalous values
     - _Requirements: FR5.3, FR3.5_
   
-  - [ ] 6.5 Add alert lifecycle management
+  - [x] 6.5 Add alert lifecycle management
     - Implement alert acknowledgment
     - Implement alert resolution
     - Update alert status in Oracle
@@ -196,8 +196,8 @@ This task list implements the production database redesign for the Smart City Io
     - _Requirements: FR5.5_
 
 
-- [ ] 7. Implement Analytics Service
-  - [ ] 7.1 Create AQI calculation utility
+- [x] 7. Implement Analytics Service
+  - [x] 7.1 Create AQI calculation utility
     - Create `backend/app/utils/aqi.py`
     - Implement `calculate_aqi(pm25)` using EPA breakpoints
     - Add all 6 AQI ranges (Good to Hazardous)
@@ -205,7 +205,7 @@ This task list implements the production database redesign for the Smart City Io
     - Verify AQI calculations match EPA standards
     - _Requirements: FR6.1_
   
-  - [ ] 7.2 Update analytics service for new metrics
+  - [x] 7.2 Update analytics service for new metrics
     - Add PM2.5 aggregation to `calculate_moving_average()`
     - Add humidity aggregation
     - Update Clean Score calculation to include PM2.5
@@ -213,7 +213,7 @@ This task list implements the production database redesign for the Smart City Io
     - Test with sample telemetry data
     - _Requirements: FR6.3, FR6.1_
   
-  - [ ] 7.3 Add cluster-level analytics
+  - [x] 7.3 Add cluster-level analytics
     - Implement `calculate_cluster_analytics()` function
     - Aggregate telemetry for all sensors in cluster
     - Calculate cluster-wide averages
@@ -222,44 +222,44 @@ This task list implements the production database redesign for the Smart City Io
     - _Requirements: FR6.5_
 
 
-- [ ] 8. Update Scheduler Service
-  - [ ] 8.1 Update hourly aggregation
+- [x] 8. Update Scheduler Service
+  - [x] 8.1 Update hourly aggregation
     - Update aggregation pipeline to include PM2.5 and humidity
     - Add AQI calculation to aggregation
     - Update TELEMETRY_SUMMARY inserts with new fields
     - Test aggregation with sample data
     - _Requirements: FR6.2, FR6.4_
   
-  - [ ] 8.2 Add cluster aggregation job
+  - [x] 8.2 Add cluster aggregation job
     - Create cluster-level aggregation task
     - Schedule to run hourly
     - Insert cluster summaries to TELEMETRY_SUMMARY
     - Test cluster aggregation
     - _Requirements: FR6.5_
   
-  - [ ] 8.3 Verify aggregation performance
+  - [x] 8.3 Verify aggregation performance
     - Ensure aggregation completes within 5 minutes
     - Add logging for aggregation duration
     - Optimize queries if needed
     - _Requirements: NFR1.4_
 
 
-- [ ] 9. Create Spatial Query Utilities
-  - [ ] 9.1 Implement Haversine distance calculation
+- [x] 9. Create Spatial Query Utilities
+  - [x] 9.1 Implement Haversine distance calculation
     - Create `backend/app/utils/spatial.py`
     - Implement `haversine_distance()` function
     - Test with known coordinates
     - Verify distance calculations are accurate
     - _Requirements: FR7.1, FR7.4_
   
-  - [ ] 9.2 Implement nearby sensor finder
+  - [x] 9.2 Implement nearby sensor finder
     - Implement `find_nearby_sensors()` function
     - Use MongoDB geospatial query
     - Fetch sensor details from Oracle
     - Test with various radius values
     - _Requirements: FR7.1, FR7.3_
   
-  - [ ] 9.3 Implement hotspot detection
+  - [x] 9.3 Implement hotspot detection
     - Implement `identify_hotspots()` function
     - Find areas with high pollution levels
     - Support filtering by metric type
@@ -267,8 +267,8 @@ This task list implements the production database redesign for the Smart City Io
     - _Requirements: FR7.2_
 
 
-- [ ] 10. Add New API Endpoints
-  - [ ] 10.1 Add location endpoints
+- [x] 10. Add New API Endpoints
+  - [x] 10.1 Add location endpoints
     - Add GET `/locations` endpoint
     - Add GET `/locations/{location_id}` endpoint
     - Add GET `/locations/{location_id}/hierarchy` endpoint
@@ -276,7 +276,7 @@ This task list implements the production database redesign for the Smart City Io
     - Test all endpoints with sample data
     - _Requirements: FR8.1_
   
-  - [ ] 10.2 Add cluster endpoints
+  - [x] 10.2 Add cluster endpoints
     - Add GET `/clusters` endpoint
     - Add GET `/clusters/{cluster_id}` endpoint
     - Add GET `/clusters/{cluster_id}/sensors` endpoint
@@ -285,7 +285,7 @@ This task list implements the production database redesign for the Smart City Io
     - Test all endpoints
     - _Requirements: FR8.2_
   
-  - [ ] 10.3 Add sensor registry endpoints
+  - [x] 10.3 Add sensor registry endpoints
     - Add GET `/sensors` endpoint
     - Add GET `/sensors/{sensor_id}` endpoint
     - Add GET `/sensors/{sensor_id}/capabilities` endpoint
@@ -294,7 +294,7 @@ This task list implements the production database redesign for the Smart City Io
     - Test all endpoints
     - _Requirements: FR8.3, FR8.4, FR8.5, FR8.6_
   
-  - [ ] 10.4 Update telemetry endpoints
+  - [x] 10.4 Update telemetry endpoints
     - Update GET `/telemetry/{sensor_id}` to return new fields
     - Add cluster filtering support
     - Add geospatial filtering support
@@ -304,7 +304,7 @@ This task list implements the production database redesign for the Smart City Io
 
 
 - [ ] 11. Update IoT Simulator
-  - [ ] 11.1 Update simulator for new schema
+  - [x] 11.1 Update simulator for new schema
     - Update sensor IDs to match seed data (all 33 sensors)
     - Add PM2.5 generation (20-60 µg/m³)
     - Add humidity generation (60-85%)
@@ -314,7 +314,7 @@ This task list implements the production database redesign for the Smart City Io
     - Test simulator with all sensors
     - _Requirements: FR10.1, FR10.2, FR10.3, FR10.4, FR10.5_
   
-  - [ ] 11.2 Test end-to-end data flow
+  - [x] 11.2 Test end-to-end data flow
     - Start all services (MQTT, MongoDB, Oracle, Backend)
     - Start simulator
     - Verify telemetry reaches MongoDB with enrichment
