@@ -278,6 +278,9 @@ class MongoDBClient:
     ) -> List[Dict[str, Any]]:
         """
         Query and downsample telemetry data using time-based aggregation.
+
+        Aggregates all 5 metrics (CO2, Noise, Temperature, PM2.5, Humidity)
+        into time buckets of *bucket_minutes* width.
         """
         pipeline = [
             {
@@ -292,9 +295,12 @@ class MongoDBClient:
                         "$dateTrunc": {"date": "$timestamp", "unit": "minute", "binSize": bucket_minutes}
                     },
                     "locationId": {"$first": "$locationId"},
+                    "clusterId": {"$first": "$clusterId"},
                     "co2": {"$avg": "$data.co2"},
                     "noise": {"$avg": "$data.noise"},
-                    "temperature": {"$avg": "$data.temperature"}
+                    "temperature": {"$avg": "$data.temperature"},
+                    "pm25": {"$avg": "$data.pm25"},
+                    "humidity": {"$avg": "$data.humidity"},
                 }
             },
             {"$sort": {"_id": -1}},
@@ -303,10 +309,13 @@ class MongoDBClient:
                     "_id": 0,
                     "sensorId": {"$literal": sensor_id},
                     "locationId": 1,
+                    "clusterId": 1,
                     "timestamp": "$_id",
                     "co2": 1,
                     "noise": 1,
-                    "temperature": 1
+                    "temperature": 1,
+                    "pm25": 1,
+                    "humidity": 1,
                 }
             }
         ]

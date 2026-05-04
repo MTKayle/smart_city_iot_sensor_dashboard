@@ -71,21 +71,53 @@ class SensorSimulator:
         Parses HCMC sensor ID convention: sen_{district}_{ward}_{type}
         to derive ward location ID: ward_{district}_{ward}
         
+        Uses a prefix lookup table for known sensors and a numeric fallback
+        for ward codes like 'w1', 'w2', etc.
+        
         Returns:
             Dictionary mapping sensor IDs to location IDs
         """
-        location_map = {}
+        # Prefix → locationId lookup for all known sensor prefixes
+        prefix_location_map = {
+            'sen_q1_ben_nghe': 'ward_q1_ben_nghe',
+            'sen_q1_ben_thanh': 'ward_q1_ben_thanh',
+            'sen_q1_ntb': 'ward_q1_nguyen_thai_binh',
+            'sen_q3_w1': 'ward_q3_01',
+            'sen_q3_w2': 'ward_q3_02',
+            'sen_q3_w3': 'ward_q3_03',
+            'sen_q5_w1': 'ward_q5_01',
+            'sen_q5_w2': 'ward_q5_02',
+            'sen_q5_w3': 'ward_q5_03',
+        }
+        
+        result = {}
         for sensor_id in self.sensor_ids:
-            # Parse: sen_q1_01_co2 → ward_q1_01
             parts = sensor_id.split('_')
-            if len(parts) >= 4 and parts[0] == 'sen':
-                ward_id = f"ward_{parts[1]}_{parts[2]}"
-                location_map[sensor_id] = ward_id
+            if len(parts) >= 4:
+                # Try longest prefix first (e.g. sen_q1_ben_nghe before sen_q1)
+                # Build prefixes: sen_q1_ben_nghe, sen_q1_ben, sen_q1
+                matched = False
+                for end_idx in range(len(parts) - 1, 1, -1):
+                    prefix = "_".join(parts[:end_idx])
+                    if prefix in prefix_location_map:
+                        result[sensor_id] = prefix_location_map[prefix]
+                        matched = True
+                        break
+                if not matched:
+                    # Fallback: try numeric ward parsing (e.g. w1 -> 01)
+                    ward_code = parts[2]
+                    stripped = ward_code.replace('w', '')
+                    try:
+                        result[sensor_id] = f"ward_{parts[1]}_{int(stripped):02d}"
+                    except ValueError:
+                        logger.warning(
+                            f"Cannot parse ward from sensor '{sensor_id}', "
+                            f"ward_code='{ward_code}' — using fallback"
+                        )
+                        result[sensor_id] = "ward_001"
             else:
-                # Fallback for old-style sensor IDs
-                ward_num = (self.sensor_ids.index(sensor_id) % 5) + 1
-                location_map[sensor_id] = f"ward_{ward_num:03d}"
-        return location_map
+                result[sensor_id] = "ward_001"
+        return result
     
     def _on_connect(self, client, userdata, flags, rc):
         """Callback when connection to MQTT broker is established."""
@@ -139,7 +171,7 @@ class SensorSimulator:
     
     def generate_telemetry(self, sensor_id: str) -> Dict:
         """
-        Generate random sensor telemetry data.
+        Generate random sensor telemetry data using the enhanced Telemetry schema.
         
         Args:
             sensor_id: Sensor identifier
@@ -150,9 +182,21 @@ class SensorSimulator:
         return {
             "sensorId": sensor_id,
             "locationId": self.sensor_locations.get(sensor_id, "ward_001"),
-            "co2": round(random.uniform(300, 2000), 2),
-            "noise": round(random.uniform(30, 100), 2),
-            "temperature": round(random.uniform(15, 35), 2),
+            "data": {
+                "co2": round(random.uniform(300, 2000), 2),
+                "noise": round(random.uniform(30, 100), 2),
+                "temperature": round(random.uniform(15, 35), 2),
+                "pm25": round(random.uniform(20, 60), 2),
+                "humidity": round(random.uniform(60, 85), 2)
+            },
+            "location": {
+                "type": "Point",
+                "coordinates": [0.0, 0.0]  # Dummy, will be enriched by backend
+            },
+            "quality": {
+                "batteryLevel": round(random.uniform(70, 100), 2),
+                "signalStrength": round(random.uniform(-60, -30), 2)
+            },
             "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         }
     
@@ -174,8 +218,10 @@ class SensorSimulator:
         try:
             result = self.client.publish(topic, payload, qos=1)
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                logger.info(f"Published to {topic}: CO2={telemetry['co2']:.1f}ppm, "
-                          f"Noise={telemetry['noise']:.1f}dB, Temp={telemetry['temperature']:.1f}°C")
+                logger.info(f"Published to {topic}: CO2={telemetry['data']['co2']:.1f}ppm, "
+                          f"PM2.5={telemetry['data']['pm25']:.1f}ug/m3, "
+                          f"Noise={telemetry['data']['noise']:.1f}dB, "
+                          f"Temp={telemetry['data']['temperature']:.1f}°C")
             else:
                 logger.error(f"Failed to publish to {topic}: {result.rc}")
         except Exception as e:
@@ -218,7 +264,18 @@ def main():
     # Read configuration from environment variables
     broker_host = os.getenv("MQTT_BROKER_HOST", "mosquitto")
     broker_port = int(os.getenv("MQTT_BROKER_PORT", "1883"))
-    sensor_list = os.getenv("SENSOR_LIST", "sensor_001,sensor_002,sensor_003,sensor_004,sensor_005")
+    
+    # All 33 sensors from the seed data
+    default_sensors = (
+        "sen_q1_ben_nghe_01,sen_q1_ben_nghe_02,sen_q1_ben_nghe_03,sen_q1_ben_nghe_04,sen_q1_ben_nghe_05,"
+        "sen_q1_ben_thanh_01,sen_q1_ben_thanh_02,sen_q1_ben_thanh_03,sen_q1_ben_thanh_04,sen_q1_ben_thanh_05,"
+        "sen_q1_ntb_01,sen_q1_ntb_02,sen_q1_ntb_03,sen_q1_ntb_04,sen_q1_ntb_05,"
+        "sen_q3_w1_01,sen_q3_w1_02,sen_q3_w1_03,sen_q3_w2_01,sen_q3_w2_02,sen_q3_w2_03,"
+        "sen_q3_w3_01,sen_q3_w3_02,sen_q3_w3_03,"
+        "sen_q5_w1_01,sen_q5_w1_02,sen_q5_w1_03,sen_q5_w2_01,sen_q5_w2_02,sen_q5_w2_03,"
+        "sen_q5_w3_01,sen_q5_w3_02,sen_q5_w3_03"
+    )
+    sensor_list = os.getenv("SENSOR_LIST", default_sensors)
     publish_interval = int(os.getenv("PUBLISH_INTERVAL", "5"))
     
     # Parse sensor list
