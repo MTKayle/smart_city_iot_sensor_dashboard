@@ -1,0 +1,8 @@
+# Force LF line endings for shell scripts and source files
+# Prevents Windows CRLF from breaking bash scripts in Linux containers
+*.sh text eol=lf
+*.py text eol=lf
+*.sql text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

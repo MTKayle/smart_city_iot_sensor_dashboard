@@ -73,13 +73,15 @@ class OracleClient:
                 logger.info(f"Attempting to connect to Oracle (attempt {retries + 1}/{MAX_RETRIES})...")
                 
                 # Create connection pool
+                # Increased max to 20 to handle concurrent API requests + MQTT worker pool
+                # (3 workers * 8 thread-pool = 24 potential concurrent operations)
                 self._pool = oracledb.create_pool(
                     user=ORACLE_USER,
                     password=ORACLE_PASSWORD,
                     dsn=ORACLE_DSN,
-                    min=2,
-                    max=10,
-                    increment=1
+                    min=5,
+                    max=20,
+                    increment=2
                 )
                 
                 # Test connection
@@ -348,13 +350,20 @@ class OracleClient:
             try:
                 cursor.execute(
                     """
-                    INSERT INTO SENSOR_REGISTRY (SensorID, LocationID, SensorType, RegisteredAt)
-                    VALUES (:sensor_id, :location_id, :sensor_type, :registered_at)
+                    INSERT INTO SENSOR_REGISTRY (SensorID, LocationID, ClusterID, Latitude, Longitude, Altitude, SensorModel, FirmwareVersion, Status, InstallDate, RegisteredAt)
+                    VALUES (:sensor_id, :location_id, :cluster_id, :latitude, :longitude, :altitude, :sensor_model, :firmware, :status, :install_date, :registered_at)
                     """,
                     {
                         'sensor_id': sensor.sensorId,
                         'location_id': sensor.locationId,
-                        'sensor_type': sensor.sensorType,
+                        'cluster_id': sensor.clusterId,
+                        'latitude': sensor.latitude,
+                        'longitude': sensor.longitude,
+                        'altitude': sensor.altitude,
+                        'sensor_model': getattr(sensor, 'sensorModel', None),
+                        'firmware': getattr(sensor, 'firmwareVersion', None),
+                        'status': getattr(sensor, 'status', 'Active'),
+                        'install_date': getattr(sensor, 'installDate', datetime.now().date()),
                         'registered_at': sensor.registeredAt
                     }
                 )
@@ -391,7 +400,7 @@ class OracleClient:
                 if location_id:
                     cursor.execute(
                         """
-                        SELECT s.SensorID, s.LocationID, s.SensorType, s.RegisteredAt,
+                        SELECT s.*,
                                l.Name as LocationName, l.Type as LocationType
                         FROM SENSOR_REGISTRY s
                         INNER JOIN LOCATIONS l ON s.LocationID = l.LocationID
@@ -403,7 +412,7 @@ class OracleClient:
                 else:
                     cursor.execute(
                         """
-                        SELECT s.SensorID, s.LocationID, s.SensorType, s.RegisteredAt,
+                        SELECT s.*,
                                l.Name as LocationName, l.Type as LocationType
                         FROM SENSOR_REGISTRY s
                         INNER JOIN LOCATIONS l ON s.LocationID = l.LocationID
@@ -433,6 +442,8 @@ class OracleClient:
         """
         Insert alert record into ALERTS table.
         
+        Uses v2 schema columns (Severity instead of AlertLevel).
+        
         Args:
             alert: Alert object containing threshold violation information
         
@@ -446,15 +457,20 @@ class OracleClient:
             try:
                 cursor.execute(
                     """
-                    INSERT INTO ALERTS (AlertID, SensorID, MetricType, Value, AlertLevel, CreatedAt)
-                    VALUES (:alert_id, :sensor_id, :metric_type, :value, :alert_level, :created_at)
+                    INSERT INTO ALERTS (AlertID, SensorID, LocationID, AlertType,
+                                       MetricType, Value, Severity, Status, CreatedAt)
+                    VALUES (:alert_id, :sensor_id, :location_id, :alert_type,
+                            :metric_type, :value, :severity, :status, :created_at)
                     """,
                     {
                         'alert_id': alert.alertId,
                         'sensor_id': alert.sensorId,
+                        'location_id': getattr(alert, 'locationId', 'unknown'),
+                        'alert_type': getattr(alert, 'alertType', 'THRESHOLD'),
                         'metric_type': alert.metricType,
                         'value': alert.value,
-                        'alert_level': alert.level,
+                        'severity': getattr(alert, 'severity', None) or getattr(alert, 'level', 'LOW'),
+                        'status': getattr(alert, 'status', 'OPEN'),
                         'created_at': alert.createdAt
                     }
                 )
@@ -482,8 +498,10 @@ class OracleClient:
         """
         Retrieve alert records with optional filters.
         
+        Uses v2 schema columns (Severity instead of AlertLevel).
+        
         Args:
-            level: Optional alert level filter (LOW, MEDIUM, HIGH)
+            level: Optional severity filter (LOW, MEDIUM, HIGH, CRITICAL)
             location_id: Optional location ID filter
             limit: Maximum number of alerts to return (default: 100)
         
@@ -495,23 +513,25 @@ class OracleClient:
         def operation(connection):
             cursor = connection.cursor()
             try:
-                # Build query with optional filters
+                # Build query with v2 schema columns
                 query = """
-                    SELECT a.AlertID, a.SensorID, a.MetricType, a.Value, a.AlertLevel, a.CreatedAt,
-                           s.LocationID, l.Name as LocationName
+                    SELECT a.AlertID, a.SensorID, a.LocationID, a.AlertType,
+                           a.MetricType, a.Value, a.Severity, a.Status,
+                           a.Threshold, a.PredictedValue, a.ConfidenceScore,
+                           a.CreatedAt,
+                           l.Name as LocationName
                     FROM ALERTS a
-                    INNER JOIN SENSOR_REGISTRY s ON a.SensorID = s.SensorID
-                    INNER JOIN LOCATIONS l ON s.LocationID = l.LocationID
+                    LEFT JOIN LOCATIONS l ON a.LocationID = l.LocationID
                     WHERE 1=1
                 """
                 params = {}
                 
                 if level:
-                    query += " AND a.AlertLevel = :p_level"
+                    query += " AND a.Severity = :p_level"
                     params['p_level'] = level
                 
                 if location_id:
-                    query += " AND s.LocationID = :p_location_id"
+                    query += " AND a.LocationID = :p_location_id"
                     params['p_location_id'] = location_id
                 
                 query += " ORDER BY a.CreatedAt DESC FETCH FIRST :p_limit ROWS ONLY"
@@ -522,7 +542,10 @@ class OracleClient:
                 columns = [col[0].lower() for col in cursor.description]
                 results = []
                 for row in cursor:
-                    results.append(dict(zip(columns, row)))
+                    row_dict = dict(zip(columns, row))
+                    # Backward compat: provide 'alertlevel' alias
+                    row_dict['alertlevel'] = row_dict.get('severity')
+                    results.append(row_dict)
                 
                 logger.debug(f"Retrieved {len(results)} alerts")
                 return results
@@ -727,6 +750,7 @@ class OracleClient:
     def get_sensor_geolocation(self, sensor_id: str) -> Optional[Dict[str, Any]]:
         """
         Query geolocation and cluster metadata for a sensor from SENSOR_REGISTRY.
+        Includes an in-memory cache to prevent connection pool starvation during high-throughput telemetry ingestion.
 
         Returns a dict with keys: latitude, longitude, clusterId, locationId.
         Returns None if sensor not found or query fails.
@@ -764,8 +788,17 @@ class OracleClient:
             finally:
                 cursor.close()
 
+        # Check cache first to avoid hammering the DB
+        if not hasattr(self, '_geo_cache'):
+            self._geo_cache = {}
+        if sensor_id in self._geo_cache:
+            return self._geo_cache[sensor_id]
+
         try:
-            return self._execute_with_retry("get_sensor_geolocation", operation)
+            result = self._execute_with_retry("get_sensor_geolocation", operation)
+            if result is not None:
+                self._geo_cache[sensor_id] = result
+            return result
         except Exception as e:
             logger.error(f"Failed to get geolocation for sensor '{sensor_id}': {e}")
             return None

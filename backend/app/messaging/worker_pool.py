@@ -603,12 +603,26 @@ class TelemetryPipeline:
         if not self.websocket_manager:
             return
 
+        from app.utils.aqi import calculate_aqi
+
         for t in batch:
             try:
-                message = {
-                    "type": "telemetry",
-                    "data": t.model_dump(mode="json"),
-                }
+                payload = t.model_dump(mode="json")
+                # Mirror nested → flat so the frontend can read either shape,
+                # and add derived AQI from PM2.5 (model itself doesn't carry it).
+                inner = payload.get("data") or {}
+                payload["co2"] = inner.get("co2")
+                payload["noise"] = inner.get("noise")
+                payload["temperature"] = inner.get("temperature")
+                payload["pm25"] = inner.get("pm25")
+                payload["humidity"] = inner.get("humidity")
+                if inner.get("pm25") is not None:
+                    aqi_result = calculate_aqi(inner["pm25"])
+                    if aqi_result:
+                        payload["aqi"] = aqi_result.aqi
+                        payload["aqi_category"] = aqi_result.category
+
+                message = {"type": "telemetry", "data": payload}
                 self.websocket_manager.broadcast(message)
                 self.metrics["ws_broadcasts"] += 1
             except Exception as exc:

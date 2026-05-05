@@ -77,19 +77,27 @@ This document describes all environment variables used in the Smart City IoT Sen
 - **Used by**: Internal service communication
 - **Note**: Uses Docker service name for internal networking
 
-## Frontend Configuration
+## Frontend Configuration (Vite)
 
-### REACT_APP_API_URL
+> Vite reads `import.meta.env.VITE_*` at BUILD time only. Pass them via
+> `docker-compose.yml` `args:` so they bake into the bundle. Setting them only
+> as runtime `environment:` is a no-op for the production build.
+
+### VITE_API_URL
 - **Description**: External base URL for backend API (from browser)
 - **Default**: `http://localhost:8000`
 - **Used by**: Frontend (browser)
 - **Production**: Change to public domain (e.g., `https://api.example.com`)
 
-### REACT_APP_WS_URL
+### VITE_WS_URL
 - **Description**: WebSocket endpoint URL (from browser)
 - **Default**: `ws://localhost:8000/ws`
 - **Used by**: Frontend (browser)
 - **Production**: Change to secure WebSocket (e.g., `wss://api.example.com/ws`)
+
+### Legacy: REACT_APP_API_URL / REACT_APP_WS_URL
+These were used by Create React App. The project has migrated to Vite — use
+`VITE_API_URL` / `VITE_WS_URL` instead. The legacy names are now ignored.
 
 ## IoT Simulator Configuration
 

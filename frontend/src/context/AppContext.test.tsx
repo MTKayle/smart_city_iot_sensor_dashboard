@@ -22,6 +22,52 @@ const mockFetchAlerts = vi.mocked(api.fetchAlerts);
 vi.mock('../hooks/useWebSocket');
 const mockUseWebSocket = vi.mocked(useWebSocketModule.useWebSocket);
 
+/** Helper to create v2-compatible Telemetry */
+const makeTelemetry = (overrides: {
+  sensorId: string;
+  locationId: string;
+  co2: number;
+  noise: number;
+  temperature: number;
+  timestamp: string;
+}): Telemetry => ({
+  sensorId: overrides.sensorId,
+  locationId: overrides.locationId,
+  data: {
+    co2: overrides.co2,
+    noise: overrides.noise,
+    temperature: overrides.temperature,
+    pm25: null,
+    humidity: null,
+  },
+  location: { type: 'Point', coordinates: [106.7, 10.78] },
+  timestamp: overrides.timestamp,
+  co2: overrides.co2,
+  noise: overrides.noise,
+  temperature: overrides.temperature,
+});
+
+/** Helper to create v2-compatible Alert */
+const makeAlert = (overrides: {
+  alertId: string;
+  sensorId: string;
+  metricType: string;
+  value: number;
+  level: 'LOW' | 'MEDIUM' | 'HIGH';
+  createdAt: string;
+}): Alert => ({
+  alertId: overrides.alertId,
+  sensorId: overrides.sensorId,
+  locationId: 'ward_001',
+  alertType: 'THRESHOLD',
+  metricType: overrides.metricType,
+  value: overrides.value,
+  severity: overrides.level,
+  status: 'OPEN',
+  createdAt: overrides.createdAt,
+  level: overrides.level,
+});
+
 describe('AppContext', () => {
   // Sample test data
   const mockSensors: Sensor[] = [
@@ -55,24 +101,24 @@ describe('AppContext', () => {
   ];
 
   const mockAlerts: Alert[] = [
-    {
+    makeAlert({
       alertId: 'alert_001',
       sensorId: 'sensor_001',
       metricType: 'CO2',
       value: 1200,
       level: 'HIGH',
       createdAt: '2024-01-15T10:30:00Z',
-    },
+    }),
   ];
 
-  const mockTelemetry: Telemetry = {
+  const mockTelemetry: Telemetry = makeTelemetry({
     sensorId: 'sensor_001',
     locationId: 'ward_001',
     co2: 450.5,
     noise: 65.2,
     temperature: 25.3,
     timestamp: '2024-01-15T10:30:00Z',
-  };
+  });
 
   beforeEach(() => {
     // Reset all mocks before each test
@@ -180,14 +226,14 @@ describe('AppContext', () => {
         expect(result.current.loading).toBe(false);
       });
 
-      const newAlert: Alert = {
+      const newAlert: Alert = makeAlert({
         alertId: 'alert_002',
         sensorId: 'sensor_002',
         metricType: 'Noise',
         value: 95,
         level: 'HIGH',
         createdAt: '2024-01-15T11:00:00Z',
-      };
+      });
 
       act(() => {
         result.current.addAlert(newAlert);
@@ -273,14 +319,14 @@ describe('AppContext', () => {
         expect(result.current.loading).toBe(false);
       });
 
-      const newAlert: Alert = {
+      const newAlert: Alert = makeAlert({
         alertId: 'alert_ws_001',
         sensorId: 'sensor_001',
         metricType: 'CO2',
         value: 1500,
         level: 'HIGH',
         createdAt: '2024-01-15T12:00:00Z',
-      };
+      });
 
       // Simulate WebSocket alert message
       act(() => {
@@ -309,14 +355,14 @@ describe('AppContext', () => {
       // Add 100 alerts
       act(() => {
         for (let i = 0; i < 100; i++) {
-          onAlertCallback?.({
+          onAlertCallback?.(makeAlert({
             alertId: `alert_${i}`,
             sensorId: 'sensor_001',
             metricType: 'CO2',
             value: 1000 + i,
             level: 'HIGH',
             createdAt: new Date().toISOString(),
-          });
+          }));
         }
       });
 
@@ -402,14 +448,14 @@ describe('AppContext', () => {
 
       const newAlerts: Alert[] = [
         ...mockAlerts,
-        {
+        makeAlert({
           alertId: 'alert_002',
           sensorId: 'sensor_002',
           metricType: 'Noise',
           value: 90,
           level: 'HIGH',
           createdAt: '2024-01-15T11:00:00Z',
-        },
+        }),
       ];
 
       mockFetchAlerts.mockResolvedValue(newAlerts);

@@ -1,13 +1,13 @@
 /**
- * ChartView Component - Time-series chart visualization for sensor telemetry
- * 
- * Displays three line charts for CO2, Noise, and Temperature metrics.
+ * ChartView Component — Time-series chart visualization for 5 sensor metrics
+ *
+ * Displays line charts for CO₂, Noise, Temperature, PM2.5, and Humidity.
  * Fetches historical data and updates in real-time via WebSocket.
- * 
- * Requirements: 12.1, 12.2, 12.3, 12.4, 12.5
+ *
+ * Requirements: FR9.2
  */
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -17,6 +17,7 @@ import {
   Title,
   Tooltip,
   Legend,
+  Filler,
   type ChartOptions,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
@@ -32,27 +33,58 @@ ChartJS.register(
   LineElement,
   Title,
   Tooltip,
-  Legend
+  Legend,
+  Filler,
 );
 
-/**
- * Time range options for filtering data
- */
 type TimeRange = '1h' | '6h' | '24h';
 
-/**
- * ChartView component props
- */
 export interface ChartViewProps {
   sensorId: string;
   wsUrl?: string;
 }
 
+// ── Metric configs ──
+interface MetricConfig {
+  key: string;
+  label: string;
+  unit: string;
+  color: string;
+  bgColor: string;
+  icon: string;
+  extractFn: (t: Telemetry) => number | null;
+}
+
+const METRICS: MetricConfig[] = [
+  {
+    key: 'co2', label: 'CO₂', unit: 'ppm', icon: '🌫️',
+    color: '#00f3ff', bgColor: 'rgba(0, 243, 255, 0.08)',
+    extractFn: (t) => t.data?.co2 ?? t.co2 ?? null,
+  },
+  {
+    key: 'noise', label: 'Noise', unit: 'dB', icon: '🔊',
+    color: '#facc15', bgColor: 'rgba(250, 204, 21, 0.08)',
+    extractFn: (t) => t.data?.noise ?? t.noise ?? null,
+  },
+  {
+    key: 'temperature', label: 'Temperature', unit: '°C', icon: '🌡️',
+    color: '#ff003c', bgColor: 'rgba(255, 0, 60, 0.08)',
+    extractFn: (t) => t.data?.temperature ?? t.temperature ?? null,
+  },
+  {
+    key: 'pm25', label: 'PM2.5', unit: 'μg/m³', icon: '💨',
+    color: '#c084fc', bgColor: 'rgba(192, 132, 252, 0.08)',
+    extractFn: (t) => t.data?.pm25 ?? t.pm25 ?? null,
+  },
+  {
+    key: 'humidity', label: 'Humidity', unit: '%', icon: '💧',
+    color: '#00ff9d', bgColor: 'rgba(0, 255, 157, 0.08)',
+    extractFn: (t) => t.data?.humidity ?? t.humidity ?? null,
+  },
+];
+
 /**
- * ChartView Component
- * 
- * Renders three line charts showing CO2, Noise, and Temperature trends.
- * Fetches last 100 telemetry readings on mount and updates in real-time.
+ * ChartView Component — Renders 5 line charts with real-time updates.
  */
 export const ChartView: React.FC<ChartViewProps> = ({
   sensorId,
@@ -62,11 +94,12 @@ export const ChartView: React.FC<ChartViewProps> = ({
   const [timeRange, setTimeRange] = useState<TimeRange>('24h');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeMetrics, setActiveMetrics] = useState<Set<string>>(
+    new Set(METRICS.map(m => m.key)),
+  );
   const dataRef = useRef<Telemetry[]>([]);
 
-  /**
-   * Fetch initial telemetry data on mount or when sensorId changes
-   */
+  // ── Fetch historical telemetry ──
   useEffect(() => {
     const loadTelemetry = async () => {
       try {
@@ -81,14 +114,13 @@ export const ChartView: React.FC<ChartViewProps> = ({
         };
         const startTime = new Date(now.getTime() - timeRangeMs[timeRange]).toISOString();
 
-        const data = await fetchTelemetry(sensorId, { 
+        const data = await fetchTelemetry(sensorId, {
           limit: 1000,
-          startTime: startTime 
+          startTime,
         });
-        
-        // Sort by timestamp ascending for chart display
-        const sortedData = data.sort((a, b) => 
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+
+        const sortedData = data.sort(
+          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
         );
         setTelemetryData(sortedData);
         dataRef.current = sortedData;
@@ -103,273 +135,154 @@ export const ChartView: React.FC<ChartViewProps> = ({
     loadTelemetry();
   }, [sensorId, timeRange]);
 
-  /**
-   * Handle real-time telemetry updates via WebSocket
-   */
+  // ── Real-time WS updates ──
   const handleTelemetryUpdate = (newTelemetry: Telemetry) => {
-    // Only update if telemetry is for the selected sensor
     if (newTelemetry.sensorId !== sensorId) return;
 
     setTelemetryData(prevData => {
-      // Add new data point and keep last 1000 readings to support 24h view
       const updatedData = [...prevData, newTelemetry].slice(-1000);
       dataRef.current = updatedData;
       return updatedData;
     });
   };
 
-  // Connect to WebSocket for real-time updates
-  useWebSocket(wsUrl, {
-    onTelemetry: handleTelemetryUpdate,
-  });
+  useWebSocket(wsUrl, { onTelemetry: handleTelemetryUpdate });
 
-  /**
-   * Filter data based on selected time range
-   */
-  const getFilteredData = (): Telemetry[] => {
+  // ── Filter data by time range ──
+  const filteredData = useMemo(() => {
     const now = new Date();
     const timeRangeMs: Record<TimeRange, number> = {
       '1h': 60 * 60 * 1000,
       '6h': 6 * 60 * 60 * 1000,
       '24h': 24 * 60 * 60 * 1000,
     };
+    const cutoff = new Date(now.getTime() - timeRangeMs[timeRange]);
+    return telemetryData.filter(t => new Date(t.timestamp) >= cutoff);
+  }, [telemetryData, timeRange]);
 
-    const cutoffTime = new Date(now.getTime() - timeRangeMs[timeRange]);
-    return telemetryData.filter(t => new Date(t.timestamp) >= cutoffTime);
-  };
-
-  const filteredData = getFilteredData();
-
-  /**
-   * Prepare chart data
-   */
+  // ── Labels ──
   const labels = filteredData.map(t => {
-    const date = new Date(t.timestamp);
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false,
-    });
+    const d = new Date(t.timestamp);
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
   });
 
-  /**
-   * Calculate auto-scaling Y-axis range with padding
-   */
-  const getYAxisRange = (values: number[]): { min: number; max: number } => {
-    if (values.length === 0) return { min: 0, max: 100 };
-    
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const padding = (max - min) * 0.1 || 10; // 10% padding or minimum 10 units
-    
-    return {
-      min: Math.max(0, Math.floor(min - padding)),
-      max: Math.ceil(max + padding),
-    };
+  // ── Y-axis auto-scaling ──
+  const getYRange = (values: (number | null)[]): { min: number; max: number } => {
+    const valid = values.filter((v): v is number => v !== null);
+    if (valid.length === 0) return { min: 0, max: 100 };
+    const mn = Math.min(...valid);
+    const mx = Math.max(...valid);
+    const pad = (mx - mn) * 0.1 || 10;
+    return { min: Math.max(0, Math.floor(mn - pad)), max: Math.ceil(mx + pad) };
   };
 
-  // CO2 Chart Data
-  const co2Values = filteredData.map(t => t.co2);
-  const co2Range = getYAxisRange(co2Values);
-  const co2Data = {
-    labels,
-    datasets: [
-      {
-        label: 'CO2 (ppm)',
-        data: co2Values,
-        borderColor: '#00f3ff', // Neon Cyan
-        backgroundColor: 'rgba(0, 243, 255, 0.1)',
-        tension: 0.3,
-        pointRadius: 2,
-        pointHoverRadius: 5,
-        pointBackgroundColor: '#00f3ff',
-      },
-    ],
-  };
-
-  // Noise Chart Data
-  const noiseValues = filteredData.map(t => t.noise);
-  const noiseRange = getYAxisRange(noiseValues);
-  const noiseData = {
-    labels,
-    datasets: [
-      {
-        label: 'Noise (dB)',
-        data: noiseValues,
-        borderColor: '#facc15', // Neon Yellow
-        backgroundColor: 'rgba(250, 204, 21, 0.1)',
-        tension: 0.3,
-        pointRadius: 2,
-        pointHoverRadius: 5,
-        pointBackgroundColor: '#facc15',
-      },
-    ],
-  };
-
-  // Temperature Chart Data
-  const temperatureValues = filteredData.map(t => t.temperature);
-  const temperatureRange = getYAxisRange(temperatureValues);
-  const temperatureData = {
-    labels,
-    datasets: [
-      {
-        label: 'Temperature (°C)',
-        data: temperatureValues,
-        borderColor: '#ff003c', // Cyberpunk Red
-        backgroundColor: 'rgba(255, 0, 60, 0.1)',
-        tension: 0.3,
-        pointRadius: 2,
-        pointHoverRadius: 5,
-        pointBackgroundColor: '#ff003c',
-      },
-    ],
-  };
-
-  /**
-   * Chart options with auto-scaling Y-axis and dark theme
-   */
-  const createChartOptions = (yAxisRange: { min: number; max: number }): ChartOptions<'line'> => ({
+  // ── Chart options factory ──
+  const createChartOptions = (
+    yRange: { min: number; max: number },
+    _metricLabel: string,
+    metricColor: string,
+  ): ChartOptions<'line'> => ({
     responsive: true,
     maintainAspectRatio: false,
+    animation: { duration: 300 },
     color: '#e0f2fe',
     plugins: {
-      legend: {
-        display: true,
-        position: 'top' as const,
-        labels: { color: '#e0f2fe' }
-      },
+      legend: { display: false },
       tooltip: {
         mode: 'index',
         intersect: false,
-        backgroundColor: 'rgba(2, 6, 23, 0.9)',
-        titleColor: '#00f3ff',
+        backgroundColor: 'rgba(2, 6, 23, 0.92)',
+        titleColor: metricColor,
         bodyColor: '#e0f2fe',
-        borderColor: '#00f3ff',
+        borderColor: metricColor,
         borderWidth: 1,
+        padding: 10,
+        cornerRadius: 8,
       },
     },
     scales: {
       x: {
         display: true,
-        title: {
-          display: true,
-          text: 'Time',
-          color: '#94a3b8'
-        },
-        ticks: {
-          maxRotation: 45,
-          minRotation: 45,
-          color: '#94a3b8'
-        },
-        grid: {
-          color: 'rgba(255, 255, 255, 0.05)'
-        }
+        ticks: { maxRotation: 45, minRotation: 45, color: '#64748b', font: { size: 10 } },
+        grid: { color: 'rgba(255, 255, 255, 0.03)' },
       },
       y: {
         display: true,
-        min: yAxisRange.min,
-        max: yAxisRange.max,
-        ticks: {
-          precision: 0,
-          color: '#94a3b8'
-        },
-        grid: {
-          color: 'rgba(255, 255, 255, 0.05)'
-        }
+        min: yRange.min,
+        max: yRange.max,
+        ticks: { precision: 0, color: '#64748b', font: { size: 10 } },
+        grid: { color: 'rgba(255, 255, 255, 0.05)' },
       },
     },
-    interaction: {
-      mode: 'nearest',
-      axis: 'x',
-      intersect: false,
-    },
+    interaction: { mode: 'nearest', axis: 'x', intersect: false },
   });
 
-  /**
-   * Render loading state
-   */
+  // ── Toggle metric visibility ──
+  const toggleMetric = (key: string) => {
+    setActiveMetrics(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        if (next.size <= 1) return prev; // Must keep at least 1
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  // ── Render states ──
   if (loading) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '400px',
-        color: '#6b7280',
-      }}>
-        Loading telemetry data...
+      <div className="chart-loading">
+        <div className="chart-loading-spinner" />
+        <span>Loading telemetry data...</span>
       </div>
     );
   }
 
-  /**
-   * Render error state
-   */
   if (error) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '400px',
-        color: '#ef4444',
-      }}>
-        Error: {error}
+      <div className="chart-error">
+        <span>⚠️ {error}</span>
       </div>
     );
   }
 
-  /**
-   * Render empty state
-   */
   if (filteredData.length === 0) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        flexDirection: 'column',
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '400px',
-        color: '#6b7280',
-      }}>
-        <p>No telemetry data available for the selected time range.</p>
-        <p style={{ fontSize: '14px', marginTop: '8px' }}>
-          Try selecting a different time range or wait for new data.
+      <div className="chart-empty">
+        <p>No telemetry data available.</p>
+        <p style={{ fontSize: '12px', marginTop: '4px' }}>
+          Try a different time range or wait for new data.
         </p>
       </div>
     );
   }
 
+  const visibleMetrics = METRICS.filter(m => activeMetrics.has(m.key));
+
   return (
-    <div style={{ width: '100%', padding: '16px' }}>
-      {/* Time Range Selector */}
-      <div style={{ 
-        display: 'flex', 
-        gap: '8px', 
-        marginBottom: '24px',
-        justifyContent: 'center',
-      }}>
+    <div style={{ width: '100%', padding: '12px' }}>
+      {/* ── Time Range Selector ── */}
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', justifyContent: 'center' }}>
         {(['1h', '6h', '24h'] as TimeRange[]).map(range => (
           <button
             key={range}
             onClick={() => setTimeRange(range)}
             style={{
-              padding: '8px 16px',
-              border: `1px solid ${timeRange === range ? '#00f3ff' : 'rgba(0, 243, 255, 0.3)'}`,
+              padding: '6px 14px',
+              border: `1px solid ${timeRange === range ? '#00f3ff' : 'rgba(0, 243, 255, 0.2)'}`,
               borderRadius: '6px',
-              backgroundColor: timeRange === range ? 'rgba(0, 243, 255, 0.2)' : 'rgba(2, 6, 23, 0.5)',
-              color: timeRange === range ? '#00f3ff' : '#94a3b8',
+              backgroundColor: timeRange === range ? 'rgba(0, 243, 255, 0.15)' : 'transparent',
+              color: timeRange === range ? '#00f3ff' : '#64748b',
               cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: timeRange === range ? '600' : '400',
+              fontSize: '12px',
+              fontWeight: timeRange === range ? '700' : '400',
               transition: 'all 0.2s',
-              boxShadow: timeRange === range ? '0 0 10px rgba(0, 243, 255, 0.5)' : 'none',
-            }}
-            onMouseEnter={(e) => {
-              if (timeRange !== range) e.currentTarget.style.backgroundColor = 'rgba(0, 243, 255, 0.1)';
-            }}
-            onMouseLeave={(e) => {
-              if (timeRange !== range) e.currentTarget.style.backgroundColor = 'rgba(2, 6, 23, 0.5)';
+              boxShadow: timeRange === range ? '0 0 8px rgba(0, 243, 255, 0.3)' : 'none',
+              textTransform: 'uppercase',
+              letterSpacing: '1px',
             }}
           >
             {range}
@@ -377,45 +290,128 @@ export const ChartView: React.FC<ChartViewProps> = ({
         ))}
       </div>
 
-      {/* Charts Grid */}
-      <div style={{ 
-        display: 'grid', 
-        gap: '24px',
-        gridTemplateColumns: '1fr',
+      {/* ── Metric Toggle Pills ── */}
+      <div style={{
+        display: 'flex', gap: '6px', marginBottom: '16px',
+        justifyContent: 'center', flexWrap: 'wrap',
       }}>
-        {/* CO2 Chart */}
-        <div style={{ 
-          padding: '16px', 
-          height: '300px',
-        }}>
-          <Line data={co2Data} options={createChartOptions(co2Range)} />
-        </div>
+        {METRICS.map(m => {
+          const isActive = activeMetrics.has(m.key);
+          return (
+            <button
+              key={m.key}
+              onClick={() => toggleMetric(m.key)}
+              style={{
+                padding: '4px 10px',
+                border: `1px solid ${isActive ? m.color : 'rgba(100,116,139,0.3)'}`,
+                borderRadius: '16px',
+                backgroundColor: isActive ? `${m.color}20` : 'transparent',
+                color: isActive ? m.color : '#64748b',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: isActive ? '600' : '400',
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+            >
+              <span>{m.icon}</span>
+              <span>{m.label}</span>
+            </button>
+          );
+        })}
+      </div>
 
-        {/* Noise Chart */}
-        <div style={{ 
-          padding: '16px', 
-          height: '300px',
-        }}>
-          <Line data={noiseData} options={createChartOptions(noiseRange)} />
-        </div>
+      {/* ── Charts Grid ── */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {visibleMetrics.map(m => {
+          const values = filteredData.map(m.extractFn);
+          const yRange = getYRange(values);
 
-        {/* Temperature Chart */}
-        <div style={{ 
-          padding: '16px', 
-          height: '300px',
-        }}>
-          <Line data={temperatureData} options={createChartOptions(temperatureRange)} />
-        </div>
+          // Latest value for header display
+          const latestVal = values[values.length - 1];
+          const validValues = values.filter((v): v is number => v !== null);
+
+          const chartData = {
+            labels,
+            datasets: [{
+              label: `${m.label} (${m.unit})`,
+              data: validValues.length > 0 ? values.map(v => v ?? undefined) : [],
+              borderColor: m.color,
+              backgroundColor: m.bgColor,
+              tension: 0.35,
+              pointRadius: 1,
+              pointHoverRadius: 4,
+              pointBackgroundColor: m.color,
+              borderWidth: 2,
+              fill: true,
+            }],
+          };
+
+          return (
+            <div
+              key={m.key}
+              style={{
+                padding: '12px',
+                borderRadius: '8px',
+                border: `1px solid ${m.color}20`,
+                background: `linear-gradient(180deg, ${m.color}08 0%, transparent 100%)`,
+              }}
+            >
+              {/* Metric header */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                marginBottom: '8px', paddingBottom: '6px',
+                borderBottom: `1px solid ${m.color}20`,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '14px' }}>{m.icon}</span>
+                  <span style={{
+                    fontSize: '13px', fontWeight: '700', color: m.color,
+                    textTransform: 'uppercase', letterSpacing: '0.5px',
+                  }}>
+                    {m.label}
+                  </span>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{
+                    fontSize: '18px', fontWeight: '700', color: m.color,
+                    textShadow: `0 0 8px ${m.color}50`,
+                    fontVariantNumeric: 'tabular-nums',
+                  }}>
+                    {latestVal !== null && latestVal !== undefined ? latestVal.toFixed(1) : '—'}
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '4px' }}>
+                    {m.unit}
+                  </span>
+                </div>
+              </div>
+
+              {/* Chart */}
+              <div style={{ height: '150px' }}>
+                {validValues.length > 0 ? (
+                  <Line data={chartData} options={createChartOptions(yRange, m.label, m.color)} />
+                ) : (
+                  <div style={{
+                    display: 'flex', justifyContent: 'center', alignItems: 'center',
+                    height: '100%', color: '#64748b', fontSize: '12px',
+                  }}>
+                    No {m.label} data available
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Data Info */}
-      <div style={{ 
-        marginTop: '16px', 
-        textAlign: 'center', 
-        color: '#6b7280',
-        fontSize: '14px',
+      <div style={{
+        marginTop: '12px', textAlign: 'center', color: '#64748b',
+        fontSize: '11px', letterSpacing: '0.5px',
       }}>
-        Showing {filteredData.length} readings for sensor {sensorId}
+        SHOWING {filteredData.length} READINGS · SENSOR {sensorId}
       </div>
     </div>
   );

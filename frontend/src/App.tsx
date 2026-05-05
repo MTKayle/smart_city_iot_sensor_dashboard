@@ -1,20 +1,20 @@
 /**
- * App Component - Main application layout for Smart City IoT Dashboard
+ * App Component - Main application layout for Smart City IoT Dashboard (v2)
  * 
  * Implements the main dashboard layout with:
  * - Header with title and connection status indicator
- * - Grid layout: MapView (left), ChartView (center), Leaderboard + AlertsPanel (right)
- * - Sensor selection state shared between MapView and ChartView
+ * - Grid layout: ChartView (left), Map (center), Leaderboard + AlertsPanel (right)
+ * - Cluster visualization on map
  * - WebSocket integration for real-time updates
  * 
- * Requirements: 11.1, 12.1, 13.1, 14.1
+ * Requirements: FR9.1, FR9.2, FR9.3, FR9.4
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { MapView, ChartView, Leaderboard, AlertsPanel } from './components';
 import { useWebSocket } from './hooks/useWebSocket';
-import { fetchSensors, fetchLocations } from './services/api';
-import type { Sensor, Location, Alert, Telemetry } from './types';
+import { fetchSensors, fetchLocations, fetchClusters } from './services/api';
+import type { Sensor, Location, Alert, Telemetry, SensorCluster } from './types';
 import './App.css';
 
 function App() {
@@ -22,13 +22,14 @@ function App() {
   const [selectedSensorId, setSelectedSensorId] = useState<string | null>(null);
   const [sensors, setSensors] = useState<Sensor[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [clusters, setClusters] = useState<SensorCluster[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [telemetryMap, setTelemetryMap] = useState<Record<string, Telemetry>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   /**
-   * Load initial data (sensors and locations)
+   * Load initial data (sensors, locations, clusters)
    */
   useEffect(() => {
     const loadInitialData = async () => {
@@ -43,6 +44,14 @@ function App() {
         
         setSensors(sensorsData);
         setLocations(locationsData);
+        
+        // Load clusters (non-blocking — may not exist yet)
+        try {
+          const clustersData = await fetchClusters();
+          setClusters(clustersData);
+        } catch {
+          console.warn('Clusters API not available yet');
+        }
         
         // Auto-select first sensor if available
         if (sensorsData.length > 0 && !selectedSensorId) {
@@ -133,6 +142,7 @@ function App() {
           locations={locations}
           alerts={alerts}
           telemetry={telemetryMap}
+          clusters={clusters}
         />
       </div>
 

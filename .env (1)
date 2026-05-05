@@ -1,0 +1,34 @@
+# MQTT Broker Configuration
+MQTT_BROKER_HOST=mosquitto
+MQTT_BROKER_PORT=1883
+
+# MongoDB Configuration
+MONGO_USERNAME=admin
+MONGO_PASSWORD=admin123
+MONGO_DATABASE=smart_city
+MONGODB_URI=mongodb://admin:admin123@mongodb:27017/smart_city?authSource=admin
+
+# Oracle Database Configuration
+# Admin credentials (used only for initial schema provisioning)
+ORACLE_ADMIN_USER=system
+ORACLE_ADMIN_PASSWORD=SmartCity2026!
+ORACLE_DATABASE=XEPDB1
+# Application user/schema (where all tables live)
+ORACLE_USER=SMARTCITY
+ORACLE_PASSWORD=SmartCity2026!
+ORACLE_DSN=oracle-xe:1521/XEPDB1
+
+# Backend API Configuration
+API_BASE_URL=http://backend:8000
+
+# Redis Configuration (durable message queue)
+REDIS_URL=redis://redis:6379/0
+
+# Frontend Configuration
+REACT_APP_API_URL=http://localhost:8000
+REACT_APP_WS_URL=ws://localhost:8000/ws
+
+# IoT Simulator Configuration
+SENSOR_LIST=sen_q1_ben_nghe_01,sen_q1_ben_nghe_02,sen_q1_ben_nghe_03,sen_q1_ben_nghe_04,sen_q1_ben_nghe_05,sen_q1_ben_thanh_01,sen_q1_ben_thanh_02,sen_q1_ben_thanh_03,sen_q1_ben_thanh_04,sen_q1_ben_thanh_05,sen_q1_ntb_01,sen_q1_ntb_02,sen_q1_ntb_03,sen_q1_ntb_04,sen_q1_ntb_05,sen_q3_w1_01,sen_q3_w1_02,sen_q3_w1_03,sen_q3_w2_01,sen_q3_w2_02,sen_q3_w2_03,sen_q3_w3_01,sen_q3_w3_02,sen_q3_w3_03,sen_q5_w1_01,sen_q5_w1_02,sen_q5_w1_03,sen_q5_w2_01,sen_q5_w2_02,sen_q5_w2_03,sen_q5_w3_01,sen_q5_w3_02,sen_q5_w3_03
+PUBLISH_INTERVAL=5
+

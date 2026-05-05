@@ -21,8 +21,8 @@ COPY . .
 # Set PYTHONPATH so app module is resolvable
 ENV PYTHONPATH=/app
 
-# Make startup script executable
-RUN chmod +x /app/startup.sh
+# Normalize line endings (defensive against Windows CRLF) and make script executable
+RUN sed -i 's/\r$//' /app/startup.sh && chmod +x /app/startup.sh
 
 # Expose the application port
 EXPOSE 8000

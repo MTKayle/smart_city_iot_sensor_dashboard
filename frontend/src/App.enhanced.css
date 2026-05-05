@@ -1,0 +1,503 @@
+/**
+ * Enhanced Smart City IoT Dashboard Styles
+ * Modern Cyberpunk/Sci-Fi Theme with Dark Mode
+ */
+
+/* ============================================================================
+   ROOT VARIABLES & THEME
+   ============================================================================ */
+
+:root {
+  /* Colors - Cyberpunk Palette */
+  --color-primary: #00f3ff;
+  --color-secondary: #ff00ff;
+  --color-accent: #00ff88;
+  --color-warning: #ffaa00;
+  --color-danger: #ff0055;
+  
+  /* Background */
+  --bg-dark: #0a0e1a;
+  --bg-darker: #050810;
+  --bg-panel: rgba(15, 23, 42, 0.95);
+  --bg-glass: rgba(15, 23, 42, 0.85);
+  
+  /* Text */
+  --text-primary: #e0f2fe;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  
+  /* Borders & Shadows */
+  --border-glow: rgba(0, 243, 255, 0.3);
+  --shadow-glow: 0 0 20px rgba(0, 243, 255, 0.2);
+  --shadow-strong: 0 8px 32px rgba(0, 0, 0, 0.6);
+  
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  
+  /* Border Radius */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  
+  /* Transitions */
+  --transition-fast: 0.2s ease;
+  --transition-normal: 0.3s ease;
+  --transition-slow: 0.5s ease;
+}
+
+/* ============================================================================
+   GLOBAL RESET & BASE STYLES
+   ============================================================================ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', 'Segoe UI', 'Roboto', sans-serif;
+  background: var(--bg-darker);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================================================
+   APP CONTAINER
+   ============================================================================ */
+
+.app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ============================================================================
+   MAP BACKGROUND (Full Screen)
+   ============================================================================ */
+
+.map-background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+/* ============================================================================
+   UI OVERLAY (Panels on top of map)
+   ============================================================================ */
+
+.app-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-overlay > * {
+  pointer-events: auto;
+}
+
+/* ============================================================================
+   HEADER
+   ============================================================================ */
+
+.app-header {
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-glow);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-strong);
+}
+
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 1920px;
+  margin: 0 auto;
+}
+
+.app-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-primary);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  text-shadow: 0 0 20px rgba(0, 243, 255, 0.5);
+  margin: 0;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-radius: var(--radius-md);
+}
+
+.status-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-indicator.connected {
+  background: var(--color-accent);
+  box-shadow: 0 0 12px var(--color-accent);
+}
+
+.status-indicator.connecting {
+  background: var(--color-warning);
+  box-shadow: 0 0 12px var(--color-warning);
+}
+
+.status-indicator.disconnected,
+.status-indicator.error {
+  background: var(--color-danger);
+  box-shadow: 0 0 12px var(--color-danger);
+  animation: none;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.1);
+  }
+}
+
+.status-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.neon-text {
+  text-shadow: 0 0 10px currentColor;
+}
+
+/* ============================================================================
+   DASHBOARD GRID
+   ============================================================================ */
+
+.dashboard-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 350px 1fr 350px;
+  grid-template-rows: 1fr;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  max-width: 1920px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ============================================================================
+   GRID SECTIONS
+   ============================================================================ */
+
+.grid-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  overflow: hidden;
+}
+
+/* Left Panel - Charts */
+.chart-section {
+  padding: var(--spacing-md);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-glow);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-strong);
+  overflow-y: auto;
+}
+
+/* Center Panel - Transparent (map visible) */
+.center-section {
+  pointer-events: none;
+  background: transparent;
+}
+
+.empty-click-through {
+  pointer-events: none;
+}
+
+/* Right Panel - Leaderboard + Alerts */
+.right-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.leaderboard-container,
+.alerts-container {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============================================================================
+   GLASS PANEL EFFECT
+   ============================================================================ */
+
+.glass-panel {
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glow);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-strong);
+  transition: all var(--transition-normal);
+}
+
+.glass-panel:hover {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-glow), var(--shadow-strong);
+}
+
+/* ============================================================================
+   LOADING & ERROR STATES
+   ============================================================================ */
+
+.app-loading,
+.app-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: var(--bg-darker);
+  color: var(--text-primary);
+  gap: var(--spacing-lg);
+}
+
+.loading-spinner {
+  width: 60px;
+  height: 60px;
+  border: 4px solid rgba(0, 243, 255, 0.2);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.app-error h2 {
+  color: var(--color-danger);
+  font-size: 24px;
+  text-shadow: 0 0 20px var(--color-danger);
+}
+
+.app-error button {
+  padding: var(--spacing-md) var(--spacing-xl);
+  background: var(--color-primary);
+  color: var(--bg-darker);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.app-error button:hover {
+  background: var(--color-accent);
+  box-shadow: 0 0 20px var(--color-accent);
+  transform: translateY(-2px);
+}
+
+/* ============================================================================
+   NO SENSOR SELECTED STATE
+   ============================================================================ */
+
+.no-sensor-selected {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: center;
+  padding: var(--spacing-lg);
+}
+
+/* ============================================================================
+   SCROLLBAR STYLING
+   ============================================================================ */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(30, 41, 59, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 243, 255, 0.3);
+  border-radius: 4px;
+  transition: background var(--transition-fast);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 243, 255, 0.5);
+}
+
+/* ============================================================================
+   RESPONSIVE DESIGN
+   ============================================================================ */
+
+/* Tablet */
+@media (max-width: 1200px) {
+  .dashboard-grid {
+    grid-template-columns: 300px 1fr 300px;
+  }
+
+  .app-title {
+    font-size: 20px;
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto 1fr;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm);
+  }
+
+  .chart-section,
+  .right-section {
+    max-height: 300px;
+  }
+
+  .app-title {
+    font-size: 16px;
+    letter-spacing: 1px;
+  }
+
+  .header-content {
+    flex-direction: column;
+    gap: var(--spacing-sm);
+  }
+}
+
+/* ============================================================================
+   ANIMATIONS
+   ============================================================================ */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.5s ease;
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.slide-in-left {
+  animation: slideInLeft 0.5s ease;
+}
+
+.slide-in-right {
+  animation: slideInRight 0.5s ease;
+}
+
+/* ============================================================================
+   UTILITY CLASSES
+   ============================================================================ */
+
+.text-primary {
+  color: var(--color-primary);
+}
+
+.text-secondary {
+  color: var(--color-secondary);
+}
+
+.text-accent {
+  color: var(--color-accent);
+}
+
+.text-warning {
+  color: var(--color-warning);
+}
+
+.text-danger {
+  color: var(--color-danger);
+}
+
+.glow-primary {
+  box-shadow: 0 0 20px var(--color-primary);
+}
+
+.glow-accent {
+  box-shadow: 0 0 20px var(--color-accent);
+}
+
+.glow-danger {
+  box-shadow: 0 0 20px var(--color-danger);
+}

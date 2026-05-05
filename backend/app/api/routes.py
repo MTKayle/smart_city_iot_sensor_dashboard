@@ -24,6 +24,7 @@ from app.models import (
     SensorWithLocation, Telemetry,
 )
 from app.services import get_analytics_service
+from app.services.alert_service import get_alert_service
 from app.utils.spatial import find_nearby_sensors, identify_hotspots
 
 logger = logging.getLogger(__name__)
@@ -449,6 +450,16 @@ def _doc_to_telemetry(doc: dict) -> dict:
         # New (v2)
         "pm25":        _v("pm25"),
         "humidity":    _v("humidity"),
+        # Mirror nested + quality so the frontend can read either shape
+        "data": {
+            "co2":         _v("co2"),
+            "noise":       _v("noise"),
+            "temperature": _v("temperature"),
+            "pm25":        _v("pm25"),
+            "humidity":    _v("humidity"),
+        },
+        "quality":  doc.get("quality"),
+        "location": doc.get("location"),
     }
     # Include AQI if PM2.5 is present
     if result["pm25"] is not None:
@@ -553,15 +564,26 @@ async def get_telemetry(
 @router.get("/alerts", summary="List alerts")
 async def get_alerts(
     level:       Optional[str] = Query(None),
+    alert_type:  Optional[str] = Query(None, description="THRESHOLD/PREDICTIVE/ANOMALY/CLUSTER"),
     location_id: Optional[str] = Query(None),
+    status:      Optional[str] = Query(None, description="OPEN/ACKNOWLEDGED/RESOLVED"),
     limit:       int = Query(100, ge=1, le=1000),
 ):
-    """Return recent alerts with optional level/location filters."""
+    """Return recent alerts with optional level/type/location/status filters."""
     if level and level not in ("LOW", "MEDIUM", "HIGH", "CRITICAL"):
         raise HTTPException(400, f"Invalid alert level: {level}")
+    if alert_type and alert_type not in ("THRESHOLD", "PREDICTIVE", "ANOMALY", "CLUSTER"):
+        raise HTTPException(400, f"Invalid alert type: {alert_type}")
+    if status and status not in ("OPEN", "ACKNOWLEDGED", "RESOLVED"):
+        raise HTTPException(400, f"Invalid alert status: {status}")
     try:
         oracle = get_oracle_client()
         rows   = oracle.get_alerts(level=level, location_id=location_id, limit=limit)
+        # Server-side filter for type/status (Oracle helper doesn't support these yet)
+        if alert_type:
+            rows = [r for r in rows if (r.get("alerttype") or "THRESHOLD") == alert_type]
+        if status:
+            rows = [r for r in rows if (r.get("status") or "OPEN") == status]
         alerts = []
         for r in rows:
             a = Alert(
@@ -572,6 +594,10 @@ async def get_alerts(
                 metricType=r["metrictype"],
                 value=r["value"],
                 severity=r.get("alertlevel") or r.get("severity") or "LOW",
+                status=r.get("status", "OPEN"),
+                threshold=r.get("threshold"),
+                predictedValue=r.get("predictedvalue"),
+                confidenceScore=r.get("confidencescore"),
                 createdAt=r["createdat"],
             )
             alerts.append(a.model_dump(by_alias=False))
@@ -581,6 +607,68 @@ async def get_alerts(
     except Exception as exc:
         logger.error(f"get_alerts error: {exc}")
         raise HTTPException(500, f"Failed to retrieve alerts: {exc}")
+
+
+@router.post("/alerts/{alert_id}/acknowledge", summary="Acknowledge an alert")
+async def acknowledge_alert(alert_id: str):
+    """Transition alert OPEN → ACKNOWLEDGED."""
+    try:
+        svc = get_alert_service()
+        ok = svc.acknowledge_alert(alert_id)
+        if not ok:
+            raise HTTPException(404, f"Alert '{alert_id}' not found or update failed")
+        oracle = get_oracle_client()
+        rows = oracle.get_alerts(limit=1000)
+        match = next((r for r in rows if r.get("alertid") == alert_id), None)
+        if not match:
+            return {"alertId": alert_id, "status": "ACKNOWLEDGED"}
+        return {
+            "alertId": match["alertid"],
+            "sensorId": match.get("sensorid"),
+            "locationId": match.get("locationid"),
+            "alertType": match.get("alerttype", "THRESHOLD"),
+            "metricType": match["metrictype"],
+            "value": match["value"],
+            "severity": match.get("severity") or match.get("alertlevel") or "LOW",
+            "status": "ACKNOWLEDGED",
+            "createdAt": match["createdat"],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"acknowledge_alert({alert_id}) error: {exc}")
+        raise HTTPException(500, f"Failed to acknowledge alert: {exc}")
+
+
+@router.post("/alerts/{alert_id}/resolve", summary="Resolve an alert")
+async def resolve_alert(alert_id: str):
+    """Transition alert → RESOLVED."""
+    try:
+        svc = get_alert_service()
+        ok = svc.resolve_alert(alert_id)
+        if not ok:
+            raise HTTPException(404, f"Alert '{alert_id}' not found or update failed")
+        oracle = get_oracle_client()
+        rows = oracle.get_alerts(limit=1000)
+        match = next((r for r in rows if r.get("alertid") == alert_id), None)
+        if not match:
+            return {"alertId": alert_id, "status": "RESOLVED"}
+        return {
+            "alertId": match["alertid"],
+            "sensorId": match.get("sensorid"),
+            "locationId": match.get("locationid"),
+            "alertType": match.get("alerttype", "THRESHOLD"),
+            "metricType": match["metrictype"],
+            "value": match["value"],
+            "severity": match.get("severity") or match.get("alertlevel") or "LOW",
+            "status": "RESOLVED",
+            "createdAt": match["createdat"],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"resolve_alert({alert_id}) error: {exc}")
+        raise HTTPException(500, f"Failed to resolve alert: {exc}")
 
 
 @router.get("/leaderboard", response_model=List[LeaderboardEntry], summary="Clean Score leaderboard")

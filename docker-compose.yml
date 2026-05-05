@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mosquitto:
     image: eclipse-mosquitto:2.0
@@ -115,12 +113,18 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # Vite reads import.meta.env.VITE_* at BUILD time, not runtime.
+        # Pass these as build args so the bundle bakes the correct URLs.
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        VITE_WS_URL:  ${VITE_WS_URL:-ws://localhost:8000/ws}
     container_name: frontend-dashboard
     ports:
       - "3000:3000"
     environment:
-      REACT_APP_API_URL: ${REACT_APP_API_URL}
-      REACT_APP_WS_URL: ${REACT_APP_WS_URL}
+      # Kept for any runtime fallback (e.g. dev server); harmless if unused.
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+      VITE_WS_URL:  ${VITE_WS_URL:-ws://localhost:8000/ws}
     depends_on:
       - backend
     networks:

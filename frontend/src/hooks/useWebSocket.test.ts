@@ -160,6 +160,14 @@ describe('useWebSocket', () => {
       const telemetryData: Telemetry = {
         sensorId: 'sensor-1',
         locationId: 'loc-1',
+        data: {
+          co2: 450,
+          noise: 65,
+          temperature: 22.5,
+          pm25: null,
+          humidity: null,
+        },
+        location: { type: 'Point', coordinates: [106.7, 10.78] },
         co2: 450,
         noise: 65,
         temperature: 22.5,
@@ -187,8 +195,12 @@ describe('useWebSocket', () => {
       const alertData: Alert = {
         alertId: 'alert-1',
         sensorId: 'sensor-1',
+        locationId: 'loc-1',
+        alertType: 'THRESHOLD',
         metricType: 'CO2',
         value: 1200,
+        severity: 'HIGH',
+        status: 'OPEN',
         level: 'HIGH',
         createdAt: '2024-01-01T12:00:00Z'
       };

@@ -4,6 +4,13 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  css: {
+    transformer: 'lightningcss',
+  },
+  build: {
+    // Use esbuild for CSS minification instead of lightningcss
+    cssMinify: 'esbuild',
+  },
   test: {
     globals: true,
     environment: 'jsdom',

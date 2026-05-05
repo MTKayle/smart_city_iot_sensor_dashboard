@@ -6,7 +6,10 @@ WORKDIR /app
 
 # Copy package files and install dependencies
 COPY package*.json ./
-RUN npm ci --silent
+# Using npm install (not ci) so the build tolerates minor lockfile drift
+# (e.g. when package.json deps are bumped). For a fully reproducible build
+# regenerate the lockfile locally then switch back to `npm ci`.
+RUN npm install --no-audit --no-fund --loglevel=error
 
 # Copy application source code (includes .env file)
 COPY . .

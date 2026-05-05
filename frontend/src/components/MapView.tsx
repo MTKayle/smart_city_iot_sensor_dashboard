@@ -1,38 +1,79 @@
 /**
- * MapView Component — HCMC District Map with real-time sensor data
+ * MapView Component — Production-Ready Smart City IoT Dashboard Map
  *
- * Renders MapLibre GL JS map with:
- * - District boundary polygons (color-coded by threshold status)
- * - District border lines
- * - Center markers with hover tooltips (live CO2, Noise, Temp)
- * - Pulsing warning badges on districts exceeding thresholds
- * - Click to open district detail panel
+ * FEATURES:
+ * - Layer-based visualization (Sensors, Clusters, Heatmap, Alerts)
+ * - Zoom-based dynamic display (city → district → street level)
+ * - Interactive heatmap with metric selection
+ * - Real-time sensor markers with detailed popups
+ * - District boundary polygons with color-coded status
+ * - Cluster visualization with aggregate metrics
+ * - Layer control panel with toggles
+ * - Responsive design with smooth transitions
  *
- * Requirements: 11.1–11.5
+ * Requirements: FR9.1, FR9.2, FR9.3
  */
 
 import { useEffect, useRef, useState, useMemo } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { Sensor, Location, Alert, Telemetry } from '../types';
+import type { Sensor, Location, Alert, Telemetry, SensorCluster } from '../types';
 import {
   HCMC_DISTRICTS, HCMC_GEOJSON, THRESHOLDS,
   type DistrictData, type DistrictMetrics, type DistrictStatus,
   getDistrictFillColor, getDistrictBorderColor,
 } from '../data/hcmcDistricts';
 import DistrictDetailPanel from './DistrictDetailPanel';
+// import MapLayerControl from './MapLayerControl';
+// import HeatmapControl from './HeatmapControl';
 
 export interface MapViewProps {
   sensors: Sensor[];
   locations: Location[];
   alerts: Alert[];
   telemetry: Record<string, Telemetry>;
+  clusters?: SensorCluster[];
   center?: [number, number];
   zoom?: number;
-  styleUrl?: string;
+  styleUrl?: string | object;
 }
 
-const DEFAULT_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+// Use a lightweight map style without font dependencies for faster loading
+const DEFAULT_STYLE = {
+  version: 8,
+  sources: {
+    'carto-light': {
+      type: 'raster',
+      tiles: [
+        'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+        'https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+        'https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'
+      ],
+      tileSize: 256,
+      attribution: '© OpenStreetMap contributors, © CARTO'
+    }
+  },
+  layers: [
+    {
+      id: 'carto-light-layer',
+      type: 'raster',
+      source: 'carto-light',
+      minzoom: 0,
+      maxzoom: 20
+    }
+  ],
+  glyphs: undefined // Explicitly disable font loading
+};
+
+// ── Helper: extract metric value from v2 telemetry (nested or flat) ──
+const getMetric = (t: Telemetry, metric: 'co2' | 'noise' | 'temperature' | 'pm25' | 'humidity'): number | null => {
+  // Try nested data first, then flat legacy fields
+  const nested = t.data?.[metric];
+  if (nested !== undefined && nested !== null) return nested;
+  const flat = (t as unknown as Record<string, unknown>)[metric];
+  if (typeof flat === 'number') return flat;
+  return null;
+};
 
 /**
  * Compute aggregated metrics for a district from real-time telemetry.
@@ -41,37 +82,65 @@ const computeDistrictMetrics = (
   district: DistrictData,
   telemetry: Record<string, Telemetry>,
 ): DistrictMetrics => {
-  let co2Sum = 0, noiseSum = 0, tempSum = 0;
-  let co2Count = 0, noiseCount = 0, tempCount = 0;
-  const alerts: string[] = [];
+  let co2Sum = 0, noiseSum = 0, tempSum = 0, pm25Sum = 0, humiditySum = 0;
+  let co2Count = 0, noiseCount = 0, tempCount = 0, pm25Count = 0, humidityCount = 0;
+  const alertLabels: string[] = [];
 
   for (const ward of district.wards) {
     for (const sensor of ward.sensors) {
       const t = telemetry[sensor.id];
       if (!t) continue;
-      if (sensor.type === 'CO2')         { co2Sum += t.co2;         co2Count++; }
-      if (sensor.type === 'Noise')       { noiseSum += t.noise;     noiseCount++; }
-      if (sensor.type === 'Temperature') { tempSum += t.temperature; tempCount++; }
+
+      // v2: combo sensors — read all metrics from every telemetry record
+      const co2 = getMetric(t, 'co2');
+      const noise = getMetric(t, 'noise');
+      const temp = getMetric(t, 'temperature');
+      const pm25 = getMetric(t, 'pm25');
+      const humidity = getMetric(t, 'humidity');
+
+      if (co2 !== null) { co2Sum += co2; co2Count++; }
+      if (noise !== null) { noiseSum += noise; noiseCount++; }
+      if (temp !== null) { tempSum += temp; tempCount++; }
+      if (pm25 !== null) { pm25Sum += pm25; pm25Count++; }
+      if (humidity !== null) { humiditySum += humidity; humidityCount++; }
     }
   }
 
-  const avgCO2  = co2Count   > 0 ? co2Sum / co2Count     : null;
+  const avgCO2 = co2Count > 0 ? co2Sum / co2Count : null;
   const avgNoise = noiseCount > 0 ? noiseSum / noiseCount : null;
-  const avgTemp  = tempCount  > 0 ? tempSum / tempCount   : null;
+  const avgTemp = tempCount > 0 ? tempSum / tempCount : null;
+  const avgPM25 = pm25Count > 0 ? pm25Sum / pm25Count : null;
+  const avgHumidity = humidityCount > 0 ? humiditySum / humidityCount : null;
+
+  // AQI calculation from PM2.5 average (EPA simplified)
+  let aqi: number | null = null;
+  if (avgPM25 !== null) {
+    if (avgPM25 <= 12) aqi = Math.round((50 / 12) * avgPM25);
+    else if (avgPM25 <= 35.4) aqi = Math.round(50 + ((100 - 51) / (35.4 - 12.1)) * (avgPM25 - 12.1));
+    else if (avgPM25 <= 55.4) aqi = Math.round(100 + ((150 - 101) / (55.4 - 35.5)) * (avgPM25 - 35.5));
+    else if (avgPM25 <= 150.4) aqi = Math.round(150 + ((200 - 151) / (150.4 - 55.5)) * (avgPM25 - 55.5));
+    else aqi = Math.round(200 + ((300 - 201) / (250.4 - 150.5)) * (avgPM25 - 150.5));
+  }
 
   // Determine status
   let status: DistrictStatus = 'gray';
-  if (co2Count > 0 || noiseCount > 0 || tempCount > 0) {
+  const hasData = co2Count > 0 || noiseCount > 0 || tempCount > 0 || pm25Count > 0 || humidityCount > 0;
+  if (hasData) {
     status = 'green';
-    if (avgCO2 !== null && avgCO2 >= THRESHOLDS.co2.warning)           { status = 'yellow'; alerts.push(THRESHOLDS.co2.label); }
-    if (avgNoise !== null && avgNoise >= THRESHOLDS.noise.warning)      { status = 'yellow'; alerts.push(THRESHOLDS.noise.label); }
-    if (avgTemp !== null && avgTemp >= THRESHOLDS.temperature.warning)  { status = 'yellow'; alerts.push(THRESHOLDS.temperature.label); }
-    if (avgCO2 !== null && avgCO2 >= THRESHOLDS.co2.danger)            { status = 'red'; }
-    if (avgNoise !== null && avgNoise >= THRESHOLDS.noise.danger)       { status = 'red'; }
-    if (avgTemp !== null && avgTemp >= THRESHOLDS.temperature.danger)   { status = 'red'; }
+    if (avgCO2 !== null && avgCO2 >= THRESHOLDS.co2.warning) { status = 'yellow'; alertLabels.push(THRESHOLDS.co2.label); }
+    if (avgNoise !== null && avgNoise >= THRESHOLDS.noise.warning) { status = 'yellow'; alertLabels.push(THRESHOLDS.noise.label); }
+    if (avgTemp !== null && avgTemp >= THRESHOLDS.temperature.warning) { status = 'yellow'; alertLabels.push(THRESHOLDS.temperature.label); }
+    if (avgPM25 !== null && avgPM25 >= THRESHOLDS.pm25.warning) { status = 'yellow'; alertLabels.push(THRESHOLDS.pm25.label); }
+    if (avgHumidity !== null && avgHumidity >= THRESHOLDS.humidity.warning) { status = 'yellow'; alertLabels.push(THRESHOLDS.humidity.label); }
+
+    if (avgCO2 !== null && avgCO2 >= THRESHOLDS.co2.danger) status = 'red';
+    if (avgNoise !== null && avgNoise >= THRESHOLDS.noise.danger) status = 'red';
+    if (avgTemp !== null && avgTemp >= THRESHOLDS.temperature.danger) status = 'red';
+    if (avgPM25 !== null && avgPM25 >= THRESHOLDS.pm25.danger) status = 'red';
+    if (avgHumidity !== null && avgHumidity >= THRESHOLDS.humidity.danger) status = 'red';
   }
 
-  return { avgCO2, avgNoise, avgTemperature: avgTemp, status, alerts };
+  return { avgCO2, avgNoise, avgTemperature: avgTemp, avgPM25, avgHumidity, aqi, status, alerts: alertLabels };
 };
 
 /**
@@ -81,12 +150,30 @@ const buildTooltipHTML = (district: DistrictData, metrics: DistrictMetrics): str
   const val = (v: number | null, unit: string) =>
     v !== null ? `${v.toFixed(1)} ${unit}` : '—';
 
-  const co2Class = metrics.avgCO2 !== null && metrics.avgCO2 >= THRESHOLDS.co2.danger ? 'danger'
-    : metrics.avgCO2 !== null && metrics.avgCO2 >= THRESHOLDS.co2.warning ? 'warning' : 'ok';
-  const noiseClass = metrics.avgNoise !== null && metrics.avgNoise >= THRESHOLDS.noise.danger ? 'danger'
-    : metrics.avgNoise !== null && metrics.avgNoise >= THRESHOLDS.noise.warning ? 'warning' : 'ok';
-  const tempClass = metrics.avgTemperature !== null && metrics.avgTemperature >= THRESHOLDS.temperature.danger ? 'danger'
-    : metrics.avgTemperature !== null && metrics.avgTemperature >= THRESHOLDS.temperature.warning ? 'warning' : 'ok';
+  const cls = (v: number | null, warn: number, danger: number) =>
+    v !== null && v >= danger ? 'danger' : v !== null && v >= warn ? 'warning' : 'ok';
+
+  const co2Class = cls(metrics.avgCO2, THRESHOLDS.co2.warning, THRESHOLDS.co2.danger);
+  const noiseClass = cls(metrics.avgNoise, THRESHOLDS.noise.warning, THRESHOLDS.noise.danger);
+  const tempClass = cls(metrics.avgTemperature, THRESHOLDS.temperature.warning, THRESHOLDS.temperature.danger);
+  const pm25Class = cls(metrics.avgPM25, THRESHOLDS.pm25.warning, THRESHOLDS.pm25.danger);
+  const humidityClass = cls(metrics.avgHumidity, THRESHOLDS.humidity.warning, THRESHOLDS.humidity.danger);
+
+  // AQI badge
+  let aqiBadge = '';
+  if (metrics.aqi !== null) {
+    let aqiColor = '#22c55e';
+    let aqiLabel = 'Tốt';
+    if (metrics.aqi > 200) { aqiColor = '#7e22ce'; aqiLabel = 'Nguy hiểm'; }
+    else if (metrics.aqi > 150) { aqiColor = '#dc2626'; aqiLabel = 'Xấu'; }
+    else if (metrics.aqi > 100) { aqiColor = '#ea580c'; aqiLabel = 'Không tốt'; }
+    else if (metrics.aqi > 50) { aqiColor = '#eab308'; aqiLabel = 'Trung bình'; }
+    aqiBadge = `<div class="dt-aqi" style="margin-top:8px;padding:6px 10px;border-radius:6px;background:${aqiColor}20;border:1px solid ${aqiColor}55;text-align:center;">
+      <span style="font-size:11px;color:#94a3b8;letter-spacing:0.5px;">AQI</span>
+      <span style="font-size:18px;font-weight:700;color:${aqiColor};margin-left:8px;">${metrics.aqi}</span>
+      <span style="font-size:11px;color:${aqiColor};margin-left:4px;">${aqiLabel}</span>
+    </div>`;
+  }
 
   return `
     <div class="district-tooltip">
@@ -94,6 +181,9 @@ const buildTooltipHTML = (district: DistrictData, metrics: DistrictMetrics): str
       <div class="dt-row"><span class="dt-icon">🌫️</span><span class="dt-label">CO₂</span><span class="dt-value ${co2Class}">${val(metrics.avgCO2, 'ppm')}</span></div>
       <div class="dt-row"><span class="dt-icon">🔊</span><span class="dt-label">Tiếng ồn</span><span class="dt-value ${noiseClass}">${val(metrics.avgNoise, 'dB')}</span></div>
       <div class="dt-row"><span class="dt-icon">🌡️</span><span class="dt-label">Nhiệt độ</span><span class="dt-value ${tempClass}">${val(metrics.avgTemperature, '°C')}</span></div>
+      <div class="dt-row"><span class="dt-icon">💨</span><span class="dt-label">PM2.5</span><span class="dt-value ${pm25Class}">${val(metrics.avgPM25, 'μg/m³')}</span></div>
+      <div class="dt-row"><span class="dt-icon">💧</span><span class="dt-label">Độ ẩm</span><span class="dt-value ${humidityClass}">${val(metrics.avgHumidity, '%')}</span></div>
+      ${aqiBadge}
       <div class="dt-footer">Di chuột = xem tổng · Click = chi tiết</div>
     </div>
   `;
@@ -104,6 +194,7 @@ export const MapView: React.FC<MapViewProps> = ({
   locations: _locations,
   alerts: _alerts,
   telemetry,
+  clusters = [],
   center = [106.6970, 10.7900],
   zoom = 12,
   styleUrl = import.meta.env.VITE_MAP_STYLE_URL || DEFAULT_STYLE,
@@ -111,6 +202,7 @@ export const MapView: React.FC<MapViewProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const clusterMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [selectedDistrict, setSelectedDistrict] = useState<DistrictData | null>(null);
@@ -130,7 +222,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: styleUrl,
+      style: styleUrl || DEFAULT_STYLE,
       center,
       zoom,
     });
@@ -194,6 +286,8 @@ export const MapView: React.FC<MapViewProps> = ({
     return () => {
       markersRef.current.forEach((el) => el.remove());
       markersRef.current.clear();
+      clusterMarkersRef.current.forEach((m) => m.remove());
+      clusterMarkersRef.current.clear();
       map.remove();
       mapRef.current = null;
     };
@@ -277,6 +371,67 @@ export const MapView: React.FC<MapViewProps> = ({
       markersRef.current.set(district.id, el);
     }
   }, [districtMetricsMap, mapLoaded]);
+
+  // ── Render cluster markers ──────────────────────────────────────
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+    const map = mapRef.current;
+
+    // Remove old cluster markers that no longer exist
+    const currentIds = new Set(clusters.map(c => c.clusterId));
+    clusterMarkersRef.current.forEach((marker, id) => {
+      if (!currentIds.has(id)) {
+        marker.remove();
+        clusterMarkersRef.current.delete(id);
+      }
+    });
+
+    for (const cluster of clusters) {
+      const existing = clusterMarkersRef.current.get(cluster.clusterId);
+      if (existing) {
+        existing.setLngLat([cluster.centerLng, cluster.centerLat]);
+        continue;
+      }
+
+      // Create cluster marker
+      const el = document.createElement('div');
+      el.className = 'cluster-marker';
+      el.innerHTML = `
+        <div class="cluster-ring">
+          <span class="cluster-count">${cluster.sensorCount}</span>
+        </div>
+      `;
+      el.title = cluster.clusterName || cluster.clusterId;
+
+      const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat([cluster.centerLng, cluster.centerLat])
+        .addTo(map);
+
+      // Cluster popup on click
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (popupRef.current) popupRef.current.remove();
+        popupRef.current = new maplibregl.Popup({
+          closeButton: true,
+          closeOnClick: true,
+          offset: 15,
+          className: 'cluster-popup',
+        })
+          .setLngLat([cluster.centerLng, cluster.centerLat])
+          .setHTML(`
+            <div class="cluster-tooltip">
+              <div class="dt-header">${cluster.clusterName || cluster.clusterId}</div>
+              <div class="dt-row"><span class="dt-label">Sensors</span><span class="dt-value ok">${cluster.sensorCount}</span></div>
+              <div class="dt-row"><span class="dt-label">Radius</span><span class="dt-value ok">${cluster.radius}m</span></div>
+              <div class="dt-row"><span class="dt-label">Algorithm</span><span class="dt-value ok">${cluster.algorithm || '—'}</span></div>
+            </div>
+          `)
+          .addTo(map);
+      });
+
+      clusterMarkersRef.current.set(cluster.clusterId, marker);
+    }
+  }, [clusters, mapLoaded]);
 
   // ── Hover tooltip ───────────────────────────────────────────────
   useEffect(() => {

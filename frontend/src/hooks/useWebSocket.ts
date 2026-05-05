@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Telemetry, Alert } from '../types';
+import { normalizeTelemetry } from '../utils/telemetry';
 
 /**
  * WebSocket connection status
@@ -91,7 +92,10 @@ export const useWebSocket = (
             switch (message.type) {
               case 'telemetry':
                 if (message.data && cbs.onTelemetry) {
-                  cbs.onTelemetry(message.data as Telemetry);
+                  // Backend broadcasts nested {data: {co2, pm25, ...}} but UI components
+                  // read flat .pm25/.co2/etc. Normalize to expose both shapes,
+                  // and derive AQI from PM2.5 (backend doesn't include it in WS payload).
+                  cbs.onTelemetry(normalizeTelemetry(message.data as Telemetry));
                 }
                 break;
               case 'alert':
@@ -127,12 +131,12 @@ export const useWebSocket = (
           console.log('WebSocket disconnected');
           setStatus('disconnected');
 
-          // Implement exponential backoff reconnection
-          const delay = Math.min(reconnectDelayRef.current, 60000); // Max 60 seconds
+          // Implement exponential backoff reconnection (capped at 30s for snappier recovery)
+          const delay = Math.min(reconnectDelayRef.current, 30000);
           console.log(`Reconnecting in ${delay}ms...`);
 
           reconnectTimeoutRef.current = window.setTimeout(() => {
-            reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, 60000);
+            reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, 30000);
             connect();
           }, delay);
         };

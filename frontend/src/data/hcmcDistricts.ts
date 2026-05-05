@@ -12,6 +12,8 @@ export const THRESHOLDS = {
   co2: { warning: 800, danger: 1000, unit: 'ppm', label: 'CO₂' },
   noise: { warning: 70, danger: 85, unit: 'dB', label: 'Tiếng ồn' },
   temperature: { warning: 35, danger: 40, unit: '°C', label: 'Nhiệt độ' },
+  pm25: { warning: 35.5, danger: 55.5, unit: 'μg/m³', label: 'PM2.5' },
+  humidity: { warning: 80, danger: 90, unit: '%', label: 'Độ ẩm' },
 };
 
 // ============================================================================
@@ -33,7 +35,7 @@ export interface WardData {
 
 export interface SensorRef {
   id: string;
-  type: 'CO2' | 'Noise' | 'Temperature';
+  type: 'CO2' | 'Noise' | 'Temperature' | 'PM2.5' | 'Humidity';
 }
 
 // ============================================================================
@@ -299,6 +301,9 @@ export interface DistrictMetrics {
   avgCO2: number | null;
   avgNoise: number | null;
   avgTemperature: number | null;
+  avgPM25: number | null;
+  avgHumidity: number | null;
+  aqi: number | null;
   status: DistrictStatus;
   alerts: string[]; // metric labels that are in danger
 }

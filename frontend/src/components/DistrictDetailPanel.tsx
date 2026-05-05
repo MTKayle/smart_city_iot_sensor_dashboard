@@ -2,7 +2,8 @@
  * DistrictDetailPanel — Shows per-ward, per-sensor details for a district.
  *
  * Opened by clicking a district on the map.
- * Displays a glassmorphism floating panel listing each ward with its 3 sensor values.
+ * Displays a glassmorphism floating panel listing each ward with 5 sensor metrics
+ * (CO₂, Noise, Temperature, PM2.5, Humidity) plus an AQI summary.
  */
 
 import type { Telemetry } from '../types';
@@ -21,6 +22,16 @@ const statusColor = (value: number | null, warn: number, danger: number): string
   return '#22c55e';
 };
 
+/** Extract metric from v2 telemetry (nested data or flat field) */
+const getVal = (t: Telemetry | undefined, metric: 'co2' | 'noise' | 'temperature' | 'pm25' | 'humidity'): number | null => {
+  if (!t) return null;
+  const nested = t.data?.[metric];
+  if (nested !== undefined && nested !== null) return nested;
+  const flat = (t as unknown as Record<string, unknown>)[metric];
+  if (typeof flat === 'number') return flat;
+  return null;
+};
+
 const DistrictDetailPanel: React.FC<Props> = ({ district, telemetry, onClose }) => {
   return (
     <div className="ddp-overlay" onClick={onClose}>
@@ -36,18 +47,28 @@ const DistrictDetailPanel: React.FC<Props> = ({ district, telemetry, onClose }) 
         {/* Ward list */}
         <div className="ddp-wards">
           {district.wards.map(ward => {
-            const co2Sensor = ward.sensors.find(s => s.type === 'CO2');
-            const noiseSensor = ward.sensors.find(s => s.type === 'Noise');
-            const tempSensor = ward.sensors.find(s => s.type === 'Temperature');
+            // Find any telemetry for the ward's sensors
+            const wardTelemetry = ward.sensors
+              .map(s => telemetry[s.id])
+              .filter(Boolean);
 
-            const co2Val = co2Sensor && telemetry[co2Sensor.id] ? telemetry[co2Sensor.id].co2 : null;
-            const noiseVal = noiseSensor && telemetry[noiseSensor.id] ? telemetry[noiseSensor.id].noise : null;
-            const tempVal = tempSensor && telemetry[tempSensor.id] ? telemetry[tempSensor.id].temperature : null;
+            // Aggregate values across all sensors in the ward
+            const aggregateMetric = (metric: 'co2' | 'noise' | 'temperature' | 'pm25' | 'humidity'): number | null => {
+              const values = wardTelemetry.map(t => getVal(t, metric)).filter((v): v is number => v !== null);
+              if (values.length === 0) return null;
+              return values.reduce((a, b) => a + b, 0) / values.length;
+            };
+
+            const co2Val = aggregateMetric('co2');
+            const noiseVal = aggregateMetric('noise');
+            const tempVal = aggregateMetric('temperature');
+            const pm25Val = aggregateMetric('pm25');
+            const humidityVal = aggregateMetric('humidity');
 
             return (
               <div className="ddp-ward" key={ward.id}>
                 <div className="ddp-ward-name">📍 {ward.name}</div>
-                <div className="ddp-sensors">
+                <div className="ddp-sensors" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
                   <div className="ddp-sensor">
                     <span className="ddp-sensor-label">🌫️ CO₂</span>
                     <span
@@ -73,6 +94,24 @@ const DistrictDetailPanel: React.FC<Props> = ({ district, telemetry, onClose }) 
                       style={{ color: statusColor(tempVal, THRESHOLDS.temperature.warning, THRESHOLDS.temperature.danger) }}
                     >
                       {tempVal !== null ? `${tempVal.toFixed(1)} °C` : '—'}
+                    </span>
+                  </div>
+                  <div className="ddp-sensor">
+                    <span className="ddp-sensor-label">💨 PM2.5</span>
+                    <span
+                      className="ddp-sensor-value"
+                      style={{ color: statusColor(pm25Val, THRESHOLDS.pm25.warning, THRESHOLDS.pm25.danger) }}
+                    >
+                      {pm25Val !== null ? `${pm25Val.toFixed(1)} μg` : '—'}
+                    </span>
+                  </div>
+                  <div className="ddp-sensor">
+                    <span className="ddp-sensor-label">💧 Độ ẩm</span>
+                    <span
+                      className="ddp-sensor-value"
+                      style={{ color: statusColor(humidityVal, THRESHOLDS.humidity.warning, THRESHOLDS.humidity.danger) }}
+                    >
+                      {humidityVal !== null ? `${humidityVal.toFixed(1)} %` : '—'}
                     </span>
                   </div>
                 </div>
