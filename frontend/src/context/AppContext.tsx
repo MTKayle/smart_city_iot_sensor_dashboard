@@ -125,21 +125,27 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, wsUrl }) => 
         setLoading(true);
         setError(null);
 
-        // Fetch sensors, locations, and recent alerts in parallel
-        const [sensorsData, locationsData, alertsData] = await Promise.all([
+        // Fetch sensors and locations first (critical for map)
+        const [sensorsData, locationsData] = await Promise.all([
           fetchSensors(),
           fetchLocations(),
-          fetchAlerts({ limit: 100 }),
         ]);
 
         setSensors(sensorsData);
         setLocations(locationsData);
-        setAlerts(alertsData);
 
         // Auto-select first sensor if available
         if (sensorsData.length > 0 && !selectedSensorId) {
           setSelectedSensorId(sensorsData[0].sensorId);
         }
+
+        // Load alerts in background (non-blocking)
+        fetchAlerts({ limit: 50 }).then(alertsData => {
+          setAlerts(alertsData);
+        }).catch(err => {
+          console.error('Error loading alerts:', err);
+        });
+
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to load initial data';
         setError(errorMessage);

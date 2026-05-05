@@ -128,10 +128,10 @@ function SensorPopup({ sensor, onViewDetails }: { sensor: SensorWithTelemetry; o
   }
 
   return (
-    <div className="min-w-[220px] p-1" style={{ background: 'oklch(0.16 0.01 260)', color: 'oklch(0.95 0 0)' }}>
+    <div className="min-w-220 p-1" style={{ background: 'oklch(0.16 0.01 260)', color: 'oklch(0.95 0 0)' }}>
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold" style={{ color: 'oklch(0.95 0 0)' }}>{sensor.name}</h3>
-        <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full uppercase ${getStatusColor(sensor.status)}`}>
+        <span className={`px-2 py-0-5 text-xxs font-medium rounded-full uppercase ${getStatusColor(sensor.status)}`}>
           {sensor.status}
         </span>
       </div>
@@ -161,7 +161,7 @@ function SensorPopup({ sensor, onViewDetails }: { sensor: SensorWithTelemetry; o
       
       <button
         onClick={onViewDetails}
-        className="w-full mt-3 py-1.5 text-xs font-medium rounded-md transition-colors"
+        className="w-full mt-3 py-1-5 text-xs font-medium rounded-md transition-colors"
         style={{ 
           background: 'oklch(0.65 0.22 255)', 
           color: 'oklch(0.12 0 0)' 
@@ -178,9 +178,9 @@ function SensorPopup({ sensor, onViewDetails }: { sensor: SensorWithTelemetry; o
 function MetricItem({ label, value, unit }: { label: string; value: number; unit: string }) {
   return (
     <div className="flex flex-col">
-      <span className="text-[10px]" style={{ color: 'oklch(0.65 0 0)' }}>{label}</span>
+      <span className="text-xxs" style={{ color: 'oklch(0.65 0 0)' }}>{label}</span>
       <span className="text-sm font-medium" style={{ color: 'oklch(0.95 0 0)' }}>
-        {value.toFixed(1)} <span className="text-[10px]" style={{ color: 'oklch(0.65 0 0)' }}>{unit}</span>
+        {value.toFixed(1)} <span className="text-xxs" style={{ color: 'oklch(0.65 0 0)' }}>{unit}</span>
       </span>
     </div>
   )
@@ -188,15 +188,15 @@ function MetricItem({ label, value, unit }: { label: string; value: number; unit
 
 function ClusterPopup({ cluster, onZoomToCluster }: { cluster: ClusterData; onZoomToCluster: () => void }) {
   return (
-    <div className="min-w-[200px] p-1" style={{ background: 'oklch(0.16 0.01 260)', color: 'oklch(0.95 0 0)' }}>
+    <div className="min-w-200 p-1" style={{ background: 'oklch(0.16 0.01 260)', color: 'oklch(0.95 0 0)' }}>
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold" style={{ color: 'oklch(0.95 0 0)' }}>Sensor Cluster</h3>
-        <span className="px-2 py-0.5 text-[10px] font-medium rounded-full" style={{ background: 'oklch(0.65 0.22 255)/0.2', color: 'oklch(0.65 0.22 255)' }}>
+        <span className="px-2 py-0-5 text-xxs font-medium rounded-full" style={{ background: 'oklch(0.65 0.22 255)/0.2', color: 'oklch(0.65 0.22 255)' }}>
           {cluster.count} sensors
         </span>
       </div>
       
-      <div className="space-y-1.5 mb-3">
+      <div className="space-y-1-5 mb-3">
         <div className="flex justify-between text-sm">
           <span style={{ color: 'oklch(0.65 0 0)' }}>Avg PM2.5</span>
           <span className="font-medium">{cluster.avgPm25.toFixed(1)} µg/m³</span>
@@ -213,7 +213,7 @@ function ClusterPopup({ cluster, onZoomToCluster }: { cluster: ClusterData; onZo
       
       <button
         onClick={onZoomToCluster}
-        className="w-full py-1.5 text-xs font-medium rounded-md transition-colors"
+        className="w-full py-1-5 text-xs font-medium rounded-md transition-colors"
         style={{ 
           background: 'oklch(0.65 0.22 255)', 
           color: 'oklch(0.12 0 0)' 
@@ -236,8 +236,12 @@ function HeatmapLayer({
 }) {
   const map = useMap()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const rafRef = useRef<number | null>(null)
   
   useEffect(() => {
+    // Skip if no sensors
+    if (sensors.length === 0) return
+    
     const canvas = L.DomUtil.create('canvas', 'leaflet-heatmap-layer')
     canvasRef.current = canvas
     
@@ -247,74 +251,81 @@ function HeatmapLayer({
     }
     
     const drawHeatmap = () => {
-      const size = map.getSize()
-      canvas.width = size.x
-      canvas.height = size.y
+      // Cancel any pending animation frame
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
+      }
       
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-      
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      
-      const bounds = map.getBounds()
-      const topLeft = map.latLngToContainerPoint(bounds.getNorthWest())
-      
-      canvas.style.transform = `translate(${topLeft.x}px, ${topLeft.y}px)`
-      canvas.style.position = 'absolute'
-      canvas.style.pointerEvents = 'none'
-      
-      sensors.forEach(sensor => {
-        const point = map.latLngToContainerPoint([sensor.lat, sensor.lng])
-        const x = point.x - topLeft.x
-        const y = point.y - topLeft.y
+      rafRef.current = requestAnimationFrame(() => {
+        const size = map.getSize()
+        canvas.width = size.x
+        canvas.height = size.y
         
-        let value: number
-        let maxValue: number
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return
         
-        switch (heatmapMetric) {
-          case 'pm25':
-            value = sensor.pm25
-            maxValue = 150
-            break
-          case 'temp':
-            value = sensor.temp
-            maxValue = 50
-            break
-          case 'humidity':
-            value = sensor.humidity
-            maxValue = 100
-            break
-          case 'co2':
-            value = sensor.co2
-            maxValue = 2000
-            break
-          case 'noise':
-            value = sensor.noise
-            maxValue = 100
-            break
-          default:
-            value = sensor.pm25
-            maxValue = 150
-        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
         
-        const intensity = Math.min(value / maxValue, 1)
-        const radius = 80
+        const bounds = map.getBounds()
+        const topLeft = map.latLngToContainerPoint(bounds.getNorthWest())
         
-        const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius)
+        canvas.style.transform = `translate(${topLeft.x}px, ${topLeft.y}px)`
+        canvas.style.position = 'absolute'
+        canvas.style.pointerEvents = 'none'
         
-        if (intensity > 0.7) {
-          gradient.addColorStop(0, `rgba(239, 68, 68, ${intensity * 0.6})`)
-          gradient.addColorStop(1, 'rgba(239, 68, 68, 0)')
-        } else if (intensity > 0.4) {
-          gradient.addColorStop(0, `rgba(245, 158, 11, ${intensity * 0.6})`)
-          gradient.addColorStop(1, 'rgba(245, 158, 11, 0)')
-        } else {
-          gradient.addColorStop(0, `rgba(16, 185, 129, ${intensity * 0.6})`)
-          gradient.addColorStop(1, 'rgba(16, 185, 129, 0)')
-        }
-        
-        ctx.fillStyle = gradient
-        ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2)
+        sensors.forEach(sensor => {
+          const point = map.latLngToContainerPoint([sensor.lat, sensor.lng])
+          const x = point.x - topLeft.x
+          const y = point.y - topLeft.y
+          
+          let value: number
+          let maxValue: number
+          
+          switch (heatmapMetric) {
+            case 'pm25':
+              value = sensor.pm25
+              maxValue = 150
+              break
+            case 'temp':
+              value = sensor.temp
+              maxValue = 50
+              break
+            case 'humidity':
+              value = sensor.humidity
+              maxValue = 100
+              break
+            case 'co2':
+              value = sensor.co2
+              maxValue = 2000
+              break
+            case 'noise':
+              value = sensor.noise
+              maxValue = 100
+              break
+            default:
+              value = sensor.pm25
+              maxValue = 150
+          }
+          
+          const intensity = Math.min(value / maxValue, 1)
+          const radius = 80
+          
+          const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius)
+          
+          if (intensity > 0.7) {
+            gradient.addColorStop(0, `rgba(239, 68, 68, ${intensity * 0.6})`)
+            gradient.addColorStop(1, 'rgba(239, 68, 68, 0)')
+          } else if (intensity > 0.4) {
+            gradient.addColorStop(0, `rgba(245, 158, 11, ${intensity * 0.6})`)
+            gradient.addColorStop(1, 'rgba(245, 158, 11, 0)')
+          } else {
+            gradient.addColorStop(0, `rgba(16, 185, 129, ${intensity * 0.6})`)
+            gradient.addColorStop(1, 'rgba(16, 185, 129, 0)')
+          }
+          
+          ctx.fillStyle = gradient
+          ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2)
+        })
       })
     }
     
@@ -323,6 +334,9 @@ function HeatmapLayer({
     map.on('zoomend', drawHeatmap)
     
     return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
+      }
       map.off('moveend', drawHeatmap)
       map.off('zoomend', drawHeatmap)
       if (canvas.parentNode) {
@@ -360,8 +374,10 @@ const MapView: React.FC = () => {
     }
   }, [zoomLevel, selectedCluster])
   
-  // Memoize sensors with telemetry data
+  // Memoize sensors with telemetry data - only process when data changes
   const sensorsWithData: SensorWithTelemetry[] = useMemo(() => {
+    if (sensors.length === 0) return []
+    
     return sensors.map(sensor => {
       const telemetry = telemetryMap[sensor.sensorId]
       const pm25 = telemetry?.pm25 || 0
@@ -435,10 +451,14 @@ const MapView: React.FC = () => {
     return createClusters(sensorsWithData)
   }, [sensorsWithData])
   
-  if (!mounted) {
+  // Show loading state while data is being fetched
+  if (!mounted || sensors.length === 0) {
     return (
       <div className="w-full h-full bg-gray-900 flex items-center justify-center">
-        <div className="animate-pulse text-gray-400">Loading map...</div>
+        <div className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+          <div className="text-gray-400">Loading map data...</div>
+        </div>
       </div>
     )
   }
@@ -470,65 +490,39 @@ const MapView: React.FC = () => {
           {layers.heatmap && <HeatmapLayer sensors={sensorsWithData} heatmapMetric={heatmapMetric} />}
           
           {/* Clusters */}
-          {showClusters && clusters.map(cluster => {
-            const markerRef = useRef<L.Marker>(null)
-            
-            return (
-              <Marker
-                key={cluster.id}
-                position={[cluster.lat, cluster.lng]}
-                icon={createClusterIcon(cluster.count, cluster.avgPm25)}
-                ref={markerRef}
-                eventHandlers={{
-                  mouseover: () => {
-                    markerRef.current?.openPopup()
-                  },
-                  mouseout: () => {
-                    markerRef.current?.closePopup()
-                  },
-                }}
-              >
-                <Popup closeButton={false} autoClose={false} closeOnClick={false}>
-                  <ClusterPopup 
-                    cluster={cluster} 
-                    onZoomToCluster={() => {
-                      setSelectedCluster(cluster)
-                      // Zoom to level 14 to show sensors
-                      if (mapRef.current) {
-                        mapRef.current.flyTo([cluster.lat, cluster.lng], 14, { duration: 0.5 })
-                      }
-                    }}
-                  />
-                </Popup>
-              </Marker>
-            )
-          })}
+          {showClusters && clusters.map(cluster => (
+            <Marker
+              key={cluster.id}
+              position={[cluster.lat, cluster.lng]}
+              icon={createClusterIcon(cluster.count, cluster.avgPm25)}
+            >
+              <Popup closeButton={false} autoClose={false} closeOnClick={false}>
+                <ClusterPopup 
+                  cluster={cluster} 
+                  onZoomToCluster={() => {
+                    setSelectedCluster(cluster)
+                    // Zoom to level 14 to show sensors
+                    if (mapRef.current) {
+                      mapRef.current.flyTo([cluster.lat, cluster.lng], 14, { duration: 0.5 })
+                    }
+                  }}
+                />
+              </Popup>
+            </Marker>
+          ))}
           
           {/* Individual Sensors */}
-          {showSensors && sensorsWithData.map(sensor => {
-            const markerRef = useRef<L.Marker>(null)
-            
-            return (
-              <Marker
-                key={sensor.id}
-                position={[sensor.lat, sensor.lng]}
-                icon={createSensorIcon(sensor.status)}
-                ref={markerRef}
-                eventHandlers={{
-                  mouseover: () => {
-                    markerRef.current?.openPopup()
-                  },
-                  mouseout: () => {
-                    markerRef.current?.closePopup()
-                  },
-                }}
-              >
-                <Popup closeButton={false} autoClose={false} closeOnClick={false}>
-                  <SensorPopup sensor={sensor} onViewDetails={() => setSelectedSensor(sensor)} />
-                </Popup>
-              </Marker>
-            )
-          })}
+          {showSensors && sensorsWithData.map(sensor => (
+            <Marker
+              key={sensor.id}
+              position={[sensor.lat, sensor.lng]}
+              icon={createSensorIcon(sensor.status)}
+            >
+              <Popup closeButton={false} autoClose={false} closeOnClick={false}>
+                <SensorPopup sensor={sensor} onViewDetails={() => setSelectedSensor(sensor)} />
+              </Popup>
+            </Marker>
+          ))}
           
           {/* Alert indicators */}
           {layers.alerts && sensorsWithData

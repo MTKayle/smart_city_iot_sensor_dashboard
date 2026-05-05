@@ -6,10 +6,6 @@ export default defineConfig({
   plugins: [react()],
   css: {
     transformer: 'lightningcss',
-    lightningcss: {
-      // Disable minification to avoid issues with arbitrary Tailwind values
-      minify: false,
-    },
   },
   build: {
     // Use esbuild for CSS minification instead of lightningcss
