@@ -69,6 +69,10 @@ export interface Telemetry {
   temperature?: number;
   pm25?: number;
   humidity?: number;
+  
+  // ── AQI fields (calculated from PM2.5) ──
+  aqi?: number;
+  aqi_category?: string;
 }
 
 // ============================================================================
@@ -129,8 +133,8 @@ export interface SensorRegistry {
   locationId: string;
   clusterId?: string | null;
 
-  latitude: number;
-  longitude: number;
+  latitude?: number;
+  longitude?: number;
   altitude?: number | null;
 
   sensorModel?: string | null;
@@ -173,8 +177,14 @@ export interface SensorCapability {
 export interface Sensor {
   sensorId: string;
   locationId: string;
-  sensorType: 'CO2' | 'Noise' | 'Temperature';
+  sensorType?: 'CO2' | 'Noise' | 'Temperature';
   registeredAt: string;
+  
+  // Additional fields from SensorRegistry for compatibility
+  latitude?: number;
+  longitude?: number;
+  status?: 'Active' | 'Offline' | 'Maintenance' | 'Decommissioned';
+  clusterId?: string | null;
 }
 
 // ============================================================================

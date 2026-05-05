@@ -1,0 +1,52 @@
+// Common types for redesign components
+
+export type ViewType = 'dashboard' | 'map' | 'sensors' | 'clusters' | 'alerts' | 'analytics' | 'settings';
+
+export type SensorStatus = 'normal' | 'warning' | 'critical';
+
+export interface Sensor {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  pm25: number;
+  temp: number;
+  humidity: number;
+  co2: number;
+  noise: number;
+  battery: number;
+  signal: number;
+  status: SensorStatus;
+  lastUpdate: string;
+}
+
+export interface Cluster {
+  id: string;
+  lat: number;
+  lng: number;
+  count: number;
+  avgPm25: number;
+  avgTemp: number;
+  status: SensorStatus;
+}
+
+export interface Alert {
+  id: number;
+  title: string;
+  location: string;
+  time: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  type: 'threshold' | 'predictive' | 'anomaly';
+  metric: string;
+  value: number;
+  threshold: number;
+}
+
+export type HeatmapMetric = 'pm25' | 'temp' | 'humidity' | 'co2' | 'noise';
+
+export interface MapLayers {
+  sensors: boolean;
+  clusters: boolean;
+  alerts: boolean;
+  heatmap: boolean;
+}

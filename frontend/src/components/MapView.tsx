@@ -1,15 +1,17 @@
 /**
- * MapView Component — HCMC District Map with real-time sensor data
+ * MapView Component — Production-Ready Smart City IoT Dashboard Map
  *
- * Renders MapLibre GL JS map with:
- * - District boundary polygons (color-coded by threshold status)
- * - District border lines
- * - Center markers with hover tooltips (live CO₂, Noise, Temp, PM2.5, Humidity)
+ * FEATURES:
+ * - Layer-based visualization (Sensors, Clusters, Heatmap, Alerts)
+ * - Zoom-based dynamic display (city → district → street level)
+ * - Interactive heatmap with metric selection
+ * - Real-time sensor markers with detailed popups
+ * - District boundary polygons with color-coded status
  * - Cluster visualization with aggregate metrics
- * - Pulsing warning badges on districts exceeding thresholds
- * - Click to open district detail panel
+ * - Layer control panel with toggles
+ * - Responsive design with smooth transitions
  *
- * Requirements: FR9.1
+ * Requirements: FR9.1, FR9.2, FR9.3
  */
 
 import { useEffect, useRef, useState, useMemo } from 'react';
@@ -22,6 +24,8 @@ import {
   getDistrictFillColor, getDistrictBorderColor,
 } from '../data/hcmcDistricts';
 import DistrictDetailPanel from './DistrictDetailPanel';
+// import MapLayerControl from './MapLayerControl';
+// import HeatmapControl from './HeatmapControl';
 
 export interface MapViewProps {
   sensors: Sensor[];
