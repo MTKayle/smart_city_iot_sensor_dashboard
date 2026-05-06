@@ -72,18 +72,46 @@ logger = logging.getLogger(__name__)
 # Thành (chợ trung tâm) reacts more strongly than a quiet residential street.
 
 WARD_PROFILES: Dict[str, Dict[str, float]] = {
-    # District 1 — downtown
+    # ── District 1 — downtown ────────────────────────────────────────
     'ward_q1_ben_nghe':         {'co2': 480, 'noise': 62, 'pm25': 45, 'temp': 29, 'hum': 72, 'traffic': 1.20},
     'ward_q1_ben_thanh':        {'co2': 520, 'noise': 68, 'pm25': 52, 'temp': 30, 'hum': 70, 'traffic': 1.30},
     'ward_q1_nguyen_thai_binh': {'co2': 460, 'noise': 58, 'pm25': 40, 'temp': 29, 'hum': 73, 'traffic': 1.10},
-    # District 3 — midtown
+    # ── District 3 — midtown ─────────────────────────────────────────
     'ward_q3_01': {'co2': 420, 'noise': 55, 'pm25': 35, 'temp': 28, 'hum': 75, 'traffic': 1.00},
     'ward_q3_02': {'co2': 410, 'noise': 52, 'pm25': 33, 'temp': 28, 'hum': 76, 'traffic': 0.95},
     'ward_q3_03': {'co2': 430, 'noise': 54, 'pm25': 36, 'temp': 28, 'hum': 74, 'traffic': 1.05},
-    # District 5 — Cholon residential
+    # ── District 5 — Cholon residential ─────────────────────────────
     'ward_q5_01': {'co2': 390, 'noise': 48, 'pm25': 30, 'temp': 27, 'hum': 78, 'traffic': 0.85},
     'ward_q5_02': {'co2': 380, 'noise': 46, 'pm25': 28, 'temp': 27, 'hum': 79, 'traffic': 0.80},
     'ward_q5_03': {'co2': 400, 'noise': 50, 'pm25': 32, 'temp': 27, 'hum': 77, 'traffic': 0.90},
+    # ── District 4 — riverside, port-adjacent ────────────────────────
+    'ward_q4_vinh_khanh': {'co2': 440, 'noise': 56, 'pm25': 38, 'temp': 28, 'hum': 76, 'traffic': 1.05},
+    'ward_q4_vinh_hoi':   {'co2': 450, 'noise': 58, 'pm25': 40, 'temp': 28, 'hum': 76, 'traffic': 1.10},
+    'ward_q4_khanh_hoi':  {'co2': 470, 'noise': 60, 'pm25': 42, 'temp': 29, 'hum': 75, 'traffic': 1.15},
+    # ── District 7 — Phú Mỹ Hưng, modern, cleaner ───────────────────
+    'ward_q7_tan_phong':  {'co2': 360, 'noise': 44, 'pm25': 26, 'temp': 27, 'hum': 80, 'traffic': 0.70},
+    'ward_q7_tan_phu':    {'co2': 370, 'noise': 46, 'pm25': 28, 'temp': 27, 'hum': 80, 'traffic': 0.75},
+    'ward_q7_tan_quy':    {'co2': 380, 'noise': 48, 'pm25': 30, 'temp': 27, 'hum': 79, 'traffic': 0.80},
+    # ── District 10 — residential mix ───────────────────────────────
+    'ward_q10_01': {'co2': 410, 'noise': 53, 'pm25': 34, 'temp': 28, 'hum': 76, 'traffic': 0.95},
+    'ward_q10_02': {'co2': 405, 'noise': 51, 'pm25': 33, 'temp': 28, 'hum': 76, 'traffic': 0.92},
+    'ward_q10_03': {'co2': 415, 'noise': 54, 'pm25': 35, 'temp': 28, 'hum': 75, 'traffic': 0.98},
+    # ── Bình Thạnh — busy mixed-use ─────────────────────────────────
+    'ward_bt_01': {'co2': 470, 'noise': 60, 'pm25': 42, 'temp': 29, 'hum': 73, 'traffic': 1.15},
+    'ward_bt_25': {'co2': 490, 'noise': 64, 'pm25': 46, 'temp': 29, 'hum': 72, 'traffic': 1.22},
+    'ward_bt_26': {'co2': 460, 'noise': 58, 'pm25': 40, 'temp': 29, 'hum': 73, 'traffic': 1.12},
+    # ── Tân Bình — airport adjacent, very dense ─────────────────────
+    'ward_tb_01': {'co2': 510, 'noise': 70, 'pm25': 50, 'temp': 30, 'hum': 71, 'traffic': 1.28},
+    'ward_tb_04': {'co2': 500, 'noise': 68, 'pm25': 48, 'temp': 30, 'hum': 71, 'traffic': 1.25},
+    'ward_tb_15': {'co2': 495, 'noise': 66, 'pm25': 47, 'temp': 30, 'hum': 72, 'traffic': 1.20},
+    # ── Phú Nhuận — leafy residential ───────────────────────────────
+    'ward_pn_07': {'co2': 395, 'noise': 49, 'pm25': 31, 'temp': 28, 'hum': 78, 'traffic': 0.85},
+    'ward_pn_09': {'co2': 400, 'noise': 50, 'pm25': 32, 'temp': 28, 'hum': 77, 'traffic': 0.88},
+    'ward_pn_15': {'co2': 405, 'noise': 51, 'pm25': 33, 'temp': 28, 'hum': 77, 'traffic': 0.90},
+    # ── Gò Vấp — suburban ───────────────────────────────────────────
+    'ward_gv_01': {'co2': 385, 'noise': 47, 'pm25': 28, 'temp': 27, 'hum': 79, 'traffic': 0.80},
+    'ward_gv_05': {'co2': 380, 'noise': 46, 'pm25': 27, 'temp': 27, 'hum': 80, 'traffic': 0.75},
+    'ward_gv_10': {'co2': 390, 'noise': 48, 'pm25': 30, 'temp': 27, 'hum': 79, 'traffic': 0.82},
 }
 
 # Sensible default if a sensor maps to an unknown ward.
@@ -257,7 +285,11 @@ class SensorSimulator:
 
     # ── Sensor → location resolution ──────────────────────────────────────
     def _initialize_sensor_locations(self) -> Dict[str, str]:
-        prefix_location_map = {
+        # Most sensor IDs follow `sen_{ward_suffix}_{nn}` and the ward_id is
+        # `ward_{ward_suffix}` — derived by stripping the trailing _NN.
+        # The map below covers the legacy IDs (Q1/Q3/Q5) that don't match
+        # this suffix convention.
+        legacy_prefix_map = {
             'sen_q1_ben_nghe':  'ward_q1_ben_nghe',
             'sen_q1_ben_thanh': 'ward_q1_ben_thanh',
             'sen_q1_ntb':       'ward_q1_nguyen_thai_binh',
@@ -268,24 +300,31 @@ class SensorSimulator:
             'sen_q5_w2':        'ward_q5_02',
             'sen_q5_w3':        'ward_q5_03',
         }
+
         result: Dict[str, str] = {}
         for sensor_id in self.sensor_ids:
             parts = sensor_id.split('_')
-            if len(parts) < 4:
+            if len(parts) < 4 or parts[0] != 'sen':
                 result[sensor_id] = 'ward_q3_01'
                 continue
+
+            # First try the legacy prefix lookup.
+            matched = False
             for end_idx in range(len(parts) - 1, 1, -1):
                 prefix = "_".join(parts[:end_idx])
-                if prefix in prefix_location_map:
-                    result[sensor_id] = prefix_location_map[prefix]
+                if prefix in legacy_prefix_map:
+                    result[sensor_id] = legacy_prefix_map[prefix]
+                    matched = True
                     break
+            if matched:
+                continue
+
+            # Otherwise: drop trailing _NN and prefix with `ward_`.
+            ward_id = "ward_" + "_".join(parts[1:-1])
+            if ward_id in WARD_PROFILES:
+                result[sensor_id] = ward_id
             else:
-                # Fallback for w1/w2/w3 numeric wards.
-                ward_code = parts[2].replace('w', '')
-                try:
-                    result[sensor_id] = f"ward_{parts[1]}_{int(ward_code):02d}"
-                except ValueError:
-                    result[sensor_id] = 'ward_q3_01'
+                result[sensor_id] = 'ward_q3_01'
         return result
 
     # ── MQTT callbacks ────────────────────────────────────────────────────
@@ -407,14 +446,46 @@ def main():
     broker_host = os.getenv("MQTT_BROKER_HOST", "mosquitto")
     broker_port = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 
+    # 96 sensors total — 33 legacy (Q1/Q3/Q5) + 63 new (Q4/Q7/Q10/BT/TB/PN/GV).
     default_sensors = (
+        # Q1 — 15 sensors
         "sen_q1_ben_nghe_01,sen_q1_ben_nghe_02,sen_q1_ben_nghe_03,sen_q1_ben_nghe_04,sen_q1_ben_nghe_05,"
         "sen_q1_ben_thanh_01,sen_q1_ben_thanh_02,sen_q1_ben_thanh_03,sen_q1_ben_thanh_04,sen_q1_ben_thanh_05,"
         "sen_q1_ntb_01,sen_q1_ntb_02,sen_q1_ntb_03,sen_q1_ntb_04,sen_q1_ntb_05,"
+        # Q3 — 9 sensors
         "sen_q3_w1_01,sen_q3_w1_02,sen_q3_w1_03,sen_q3_w2_01,sen_q3_w2_02,sen_q3_w2_03,"
         "sen_q3_w3_01,sen_q3_w3_02,sen_q3_w3_03,"
+        # Q5 — 9 sensors
         "sen_q5_w1_01,sen_q5_w1_02,sen_q5_w1_03,sen_q5_w2_01,sen_q5_w2_02,sen_q5_w2_03,"
-        "sen_q5_w3_01,sen_q5_w3_02,sen_q5_w3_03"
+        "sen_q5_w3_01,sen_q5_w3_02,sen_q5_w3_03,"
+        # Q4 — 9 sensors
+        "sen_q4_vinh_khanh_01,sen_q4_vinh_khanh_02,sen_q4_vinh_khanh_03,"
+        "sen_q4_vinh_hoi_01,sen_q4_vinh_hoi_02,sen_q4_vinh_hoi_03,"
+        "sen_q4_khanh_hoi_01,sen_q4_khanh_hoi_02,sen_q4_khanh_hoi_03,"
+        # Q7 — 9 sensors
+        "sen_q7_tan_phong_01,sen_q7_tan_phong_02,sen_q7_tan_phong_03,"
+        "sen_q7_tan_phu_01,sen_q7_tan_phu_02,sen_q7_tan_phu_03,"
+        "sen_q7_tan_quy_01,sen_q7_tan_quy_02,sen_q7_tan_quy_03,"
+        # Q10 — 9 sensors
+        "sen_q10_01_01,sen_q10_01_02,sen_q10_01_03,"
+        "sen_q10_02_01,sen_q10_02_02,sen_q10_02_03,"
+        "sen_q10_03_01,sen_q10_03_02,sen_q10_03_03,"
+        # Bình Thạnh — 9 sensors
+        "sen_bt_01_01,sen_bt_01_02,sen_bt_01_03,"
+        "sen_bt_25_01,sen_bt_25_02,sen_bt_25_03,"
+        "sen_bt_26_01,sen_bt_26_02,sen_bt_26_03,"
+        # Tân Bình — 9 sensors
+        "sen_tb_01_01,sen_tb_01_02,sen_tb_01_03,"
+        "sen_tb_04_01,sen_tb_04_02,sen_tb_04_03,"
+        "sen_tb_15_01,sen_tb_15_02,sen_tb_15_03,"
+        # Phú Nhuận — 9 sensors
+        "sen_pn_07_01,sen_pn_07_02,sen_pn_07_03,"
+        "sen_pn_09_01,sen_pn_09_02,sen_pn_09_03,"
+        "sen_pn_15_01,sen_pn_15_02,sen_pn_15_03,"
+        # Gò Vấp — 9 sensors
+        "sen_gv_01_01,sen_gv_01_02,sen_gv_01_03,"
+        "sen_gv_05_01,sen_gv_05_02,sen_gv_05_03,"
+        "sen_gv_10_01,sen_gv_10_02,sen_gv_10_03"
     )
     sensor_list = os.getenv("SENSOR_LIST", default_sensors)
     publish_interval = int(os.getenv("PUBLISH_INTERVAL", "5"))

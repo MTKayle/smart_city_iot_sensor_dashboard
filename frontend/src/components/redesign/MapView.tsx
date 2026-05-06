@@ -391,6 +391,10 @@ const MapView: React.FC<MapViewProps> = ({ focusTarget, onFocusConsumed }) => {
   // Oracle cluster the user just opened from the Clusters page — drives the
   // glowing ring on the map so the focused area is unmistakable.
   const [focusedOracleClusterId, setFocusedOracleClusterId] = useState<string | null>(null)
+  // Sensor the user just navigated to from another view (Alerts → Định Vị,
+  // Sensors table, Dashboard alerts). Drives a pulsing ring around the
+  // marker so the target is unmistakable for a few seconds.
+  const [focusedSensorId, setFocusedSensorId] = useState<string | null>(null)
   const [layers, setLayers] = useState<MapLayers>({
     sensors: true,
     clusters: true,
@@ -412,9 +416,10 @@ const MapView: React.FC<MapViewProps> = ({ focusTarget, onFocusConsumed }) => {
     }
   }, [zoomLevel, selectedCluster])
 
-  // External focus request from another view (e.g. ClustersView "Xem trên bản đồ").
-  // Fly to the requested coordinates and surface a short-lived cluster halo
-  // so the user sees which area was just opened.
+  // External focus request from another view (e.g. ClustersView "Xem trên bản đồ"
+  // or AlertsView "Định Vị"). Fly to the requested coordinates, optionally pin
+  // the cluster halo or auto-select the specific sensor that triggered the
+  // navigation.
   useEffect(() => {
     if (!focusTarget) return
     setExternalFlyTarget({
@@ -425,15 +430,25 @@ const MapView: React.FC<MapViewProps> = ({ focusTarget, onFocusConsumed }) => {
     if (focusTarget.clusterId) {
       setFocusedOracleClusterId(focusTarget.clusterId)
     }
+    // Auto-select the sensor — MapView shows SensorDetailPanel for it and the
+    // marker becomes the camera anchor.
+    if (focusTarget.sensorId) {
+      setSelectedSensorId(focusTarget.sensorId)
+      setFocusedSensorId(focusTarget.sensorId)
+      // Make sure no cluster panel is also open at the same time.
+      setSelectedCluster(null)
+    }
     onFocusConsumed?.()
     // Release fly priority once the animation has settled so future clicks
     // (sensor, grid-cluster) regain control of the camera. The halo lives
     // longer (8s) so the user can clearly see which area was opened.
     const flyTimer = setTimeout(() => setExternalFlyTarget(null), 1000)
     const haloTimer = setTimeout(() => setFocusedOracleClusterId(null), 8000)
+    const sensorHaloTimer = setTimeout(() => setFocusedSensorId(null), 10000)
     return () => {
       clearTimeout(flyTimer)
       clearTimeout(haloTimer)
+      clearTimeout(sensorHaloTimer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusTarget])
@@ -647,6 +662,28 @@ const MapView: React.FC<MapViewProps> = ({ focusTarget, onFocusConsumed }) => {
               }}
             />
           )}
+
+          {/* Focused sensor halo — appears for ~10s after navigating from an
+              Alert "Định Vị" or Sensors table action. Pulsing orange ring
+              makes it obvious which sensor was selected. */}
+          {focusedSensorId && (() => {
+            const s = sensorsWithData.find((x) => x.id === focusedSensorId)
+            if (!s) return null
+            return (
+              <CircleMarker
+                key={`sensor-focus-${s.id}`}
+                center={[s.lat, s.lng]}
+                radius={26}
+                pathOptions={{
+                  color: '#F97316',
+                  fillColor: '#F97316',
+                  fillOpacity: 0.18,
+                  weight: 3,
+                  className: 'sensor-focus-halo',
+                }}
+              />
+            )
+          })()}
         </MapContainer>
 
         {/* Map Controls */}

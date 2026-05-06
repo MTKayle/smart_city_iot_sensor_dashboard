@@ -55,6 +55,9 @@ export interface MapFocusTarget {
   zoom: number;
   /** Optional hint for the cluster panel that should auto-open after focusing. */
   clusterId?: string;
+  /** Optional sensor ID — when set, the sensor detail panel opens automatically
+      and the marker becomes the camera anchor. */
+  sensorId?: string;
 }
 
 export interface MapLayers {

@@ -708,6 +708,53 @@ async def get_leaderboard(limit: int = Query(100, ge=1, le=1000)):
         raise HTTPException(500, f"Failed to retrieve leaderboard: {exc}")
 
 
+@router.post("/leaderboard/refresh", summary="Force-refresh leaderboard (re-aggregates Mongo → Oracle)")
+async def refresh_leaderboard(
+    granularity: str = Query("HOURLY", regex="^(HOURLY|DAILY|WEEKLY)$"),
+    days: int = Query(2, ge=1, le=30),
+):
+    """
+    Manually trigger the MongoDB → Oracle aggregator on the rolling window
+    (default: HOURLY × 2 days). After it finishes, the latest leaderboard
+    is returned.
+
+    Use case: the "Làm Mới" button on the Leaderboard view — guarantees
+    the user sees up-to-the-minute data without waiting for the next
+    scheduled run.
+    """
+    try:
+        # Run aggregator synchronously so the caller gets fresh data.
+        from app.db.aggregate_summary import aggregate as aggregate_summary
+        aggregate_summary(granularity, days)
+
+        # Return the freshly-aggregated leaderboard.
+        oracle = get_oracle_client()
+        rows = oracle.get_leaderboard(limit=100)
+        result = []
+        for r in rows:
+            result.append({
+                "locationId":     r["locationid"],
+                "locationName":   r["locationname"],
+                "avgCO2":         r["avgco2"],
+                "avgNoise":       r["avgnoise"],
+                "avgTemperature": r["avgtemperature"],
+                "avgPM25":        r.get("avgpm25"),
+                "avgHumidity":    r.get("avghumidity"),
+                "aqi":            r.get("aqi"),
+                "cleanScore":     r["cleanscore"],
+                "rank":           r["rank"],
+            })
+        return {
+            "refreshedAt": datetime.now(timezone.utc).isoformat(),
+            "granularity": granularity,
+            "days": days,
+            "entries": result,
+        }
+    except Exception as exc:
+        logger.error(f"refresh_leaderboard error: {exc}")
+        raise HTTPException(500, f"Failed to refresh leaderboard: {exc}")
+
+
 # ============================================================================
 # Historical summary (Oracle TELEMETRY_SUMMARY)
 # ============================================================================
@@ -785,3 +832,95 @@ async def get_location_history(
     except Exception as exc:
         logger.error(f"get_location_history({location_id}) error: {exc}")
         raise HTTPException(500, f"Failed to retrieve history: {exc}")
+
+
+# ============================================================================
+# Advanced analytics — SQL window function showcase
+# ============================================================================
+@router.get(
+    "/analytics/trend/{location_id}",
+    summary="Day-over-day trend with delta, moving average, percentile",
+)
+async def analytics_trend(
+    location_id: str,
+    granularity: str = Query("DAILY", regex="^(HOURLY|DAILY|WEEKLY)$"),
+    days: int = Query(30, ge=1, le=365),
+):
+    """
+    Per-bucket trend enriched with window-function metrics:
+    LAG (delta), AVG OVER ROWS (moving average), PERCENT_RANK (percentile),
+    FIRST_VALUE (period best/worst).
+    """
+    try:
+        oracle = get_oracle_client()
+        return oracle.get_location_trend_analysis(location_id, granularity, days)
+    except Exception as exc:
+        logger.error(f"analytics_trend({location_id}) error: {exc}")
+        raise HTTPException(500, f"Failed: {exc}")
+
+
+@router.get(
+    "/analytics/ranking-movement",
+    summary="District ranking now vs N days ago (rank delta, quartile, score share)",
+)
+async def analytics_ranking_movement(days: int = Query(7, ge=1, le=90)):
+    """
+    Compares current district rank with rank N days ago.
+    Window functions: DENSE_RANK, LAG, NTILE(4), RATIO_TO_REPORT.
+    """
+    try:
+        oracle = get_oracle_client()
+        return oracle.get_ranking_movement(days)
+    except Exception as exc:
+        logger.error(f"analytics_ranking_movement error: {exc}")
+        raise HTTPException(500, f"Failed: {exc}")
+
+
+@router.get(
+    "/analytics/ward-co2-moving-average",
+    summary="Per-ward moving CO₂ average — exact project brief requirement",
+)
+async def analytics_ward_co2_moving_average(
+    days: int = Query(30, ge=1, le=365),
+    window_size: int = Query(7, ge=2, le=30),
+):
+    """
+    Project brief Topic 5 explicitly requires:
+    "Use SQL Window Functions to calculate moving CO2 averages for every ward."
+
+    Implementation in a single query:
+      • **Recursive CTE** walks the LOCATIONS hierarchy from City → Ward.
+      • **AVG(AvgCO2) OVER (PARTITION BY LocationID ORDER BY TimeBucket
+         ROWS BETWEEN N PRECEDING AND CURRENT ROW)** computes the rolling
+         CO₂ mean per ward.
+      • LAG and STDDEV in the same window provide delta + ±1σ band.
+
+    Returns one row per (ward, time-bucket).
+    """
+    try:
+        oracle = get_oracle_client()
+        return oracle.get_ward_moving_co2_averages(days, window_size)
+    except Exception as exc:
+        logger.error(f"analytics_ward_co2_moving_average error: {exc}")
+        raise HTTPException(500, f"Failed: {exc}")
+
+
+@router.get(
+    "/analytics/anomalies",
+    summary="Per-sensor outliers detected via window-based z-score",
+)
+async def analytics_anomalies(
+    hours: int = Query(24, ge=1, le=720),
+    sigma: float = Query(3.0, ge=1.0, le=10.0),
+):
+    """
+    Detects readings that exceed μ + σ·sigma per sensor.
+    Window functions: AVG/STDDEV/COUNT OVER PARTITION BY SensorID,
+    ROW_NUMBER OVER ORDER BY z_score DESC.
+    """
+    try:
+        oracle = get_oracle_client()
+        return oracle.get_anomaly_readings(hours, sigma)
+    except Exception as exc:
+        logger.error(f"analytics_anomalies error: {exc}")
+        raise HTTPException(500, f"Failed: {exc}")

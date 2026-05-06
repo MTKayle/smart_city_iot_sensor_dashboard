@@ -90,7 +90,13 @@ const AlertsView: React.FC<AlertsViewProps> = ({ onFocusOnMap }) => {
     if (sensorId) {
       const sensor = sensors.find((s) => s.sensorId === sensorId);
       if (sensor && sensor.latitude != null && sensor.longitude != null) {
-        onFocusOnMap({ lat: sensor.latitude, lng: sensor.longitude, zoom: 15 });
+        // Pass sensorId so MapView opens the detail panel for THIS sensor.
+        onFocusOnMap({
+          lat: sensor.latitude,
+          lng: sensor.longitude,
+          zoom: 17,
+          sensorId,
+        });
         return;
       }
     }

@@ -579,6 +579,36 @@ export const fetchAlerts = async (
 // Leaderboard API
 // ============================================================================
 
+export interface LeaderboardRefreshResult {
+  refreshedAt: string;
+  granularity: 'HOURLY' | 'DAILY' | 'WEEKLY';
+  days: number;
+  entries: LeaderboardEntry[];
+}
+
+/**
+ * Force-refresh: triggers the MongoDB → Oracle aggregator on the rolling
+ * window then returns the freshly-aggregated leaderboard. Use this from the
+ * UI's "Làm Mới" button so the user gets up-to-the-minute data without
+ * waiting for the next scheduled run.
+ */
+export const triggerLeaderboardRefresh = async (
+  granularity: 'HOURLY' | 'DAILY' | 'WEEKLY' = 'HOURLY',
+  days = 2,
+): Promise<LeaderboardRefreshResult> => {
+  try {
+    const response = await apiClient.post<LeaderboardRefreshResult>(
+      '/api/leaderboard/refresh',
+      null,
+      { params: { granularity, days } },
+    );
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError('Failed to refresh leaderboard', undefined, error);
+  }
+};
+
 /**
  * Fetch leaderboard of locations ranked by environmental quality.
  */

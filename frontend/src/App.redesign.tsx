@@ -67,7 +67,7 @@ const App: React.FC = () => {
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
         <div className={`main-content ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-          <TopNavbar />
+          <TopNavbar onNavigate={setCurrentView} onFocusOnMap={focusMapOn} />
           <div className="view-container">
             {renderView()}
           </div>

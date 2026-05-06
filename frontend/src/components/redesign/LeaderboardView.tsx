@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Trophy, RefreshCw, Search, Filter, RotateCcw } from 'lucide-react';
+import { Trophy, RefreshCw, Search, Filter, RotateCcw, Check, AlertTriangle } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
+import { triggerLeaderboardRefresh } from '../../services/api';
 import type { LeaderboardEntry } from '../../types';
 
 type SortField =
@@ -50,6 +51,9 @@ const LeaderboardView: React.FC = () => {
   const [sortField, setSortField] = useState<SortField>('rank');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshAt, setLastRefreshAt] = useState<Date | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshSuccess, setRefreshSuccess] = useState(false);
 
   // ─── Filter state ───
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all');
@@ -151,13 +155,34 @@ const LeaderboardView: React.FC = () => {
     }
   };
 
+  // Force-refresh: trigger the aggregator on the server, then re-fetch.
+  // This guarantees the user sees up-to-the-minute data instead of whatever
+  // the scheduler computed last.
   const handleRefresh = async () => {
     setRefreshing(true);
+    setRefreshError(null);
+    setRefreshSuccess(false);
     try {
+      const result = await triggerLeaderboardRefresh('HOURLY', 2);
+      setLastRefreshAt(new Date(result.refreshedAt));
+      // Re-fetch via context so AppContext.leaderboard updates everywhere.
       await refreshLeaderboard();
+      setRefreshSuccess(true);
+      // Auto-hide the success indicator after 3s.
+      setTimeout(() => setRefreshSuccess(false), 3000);
+    } catch (err) {
+      console.error('Leaderboard refresh failed:', err);
+      setRefreshError('Không thể làm mới — kiểm tra kết nối backend');
+      setTimeout(() => setRefreshError(null), 5000);
     } finally {
       setRefreshing(false);
     }
+  };
+
+  const formatLastRefresh = (d: Date): string => {
+    return d.toLocaleTimeString('vi-VN', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
   };
 
   const sortIcon = (f: SortField) =>
@@ -193,15 +218,38 @@ const LeaderboardView: React.FC = () => {
               : `${leaderboard.length} khu vực có dữ liệu`}
           </p>
         </div>
-        <button
-          className="filter-btn"
-          onClick={handleRefresh}
-          disabled={refreshing}
-          style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-        >
-          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-          {refreshing ? 'Đang làm mới…' : 'Làm Mới'}
-        </button>
+        <div className="leaderboard-refresh-block">
+          <button
+            className={`leaderboard-refresh-btn ${refreshSuccess ? 'success' : ''} ${refreshError ? 'error' : ''}`}
+            onClick={handleRefresh}
+            disabled={refreshing}
+          >
+            {refreshSuccess ? (
+              <Check className="w-4 h-4" />
+            ) : refreshError ? (
+              <AlertTriangle className="w-4 h-4" />
+            ) : (
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            )}
+            <span>
+              {refreshing
+                ? 'Đang aggregate Mongo → Oracle…'
+                : refreshSuccess
+                ? 'Đã làm mới'
+                : refreshError
+                ? 'Lỗi'
+                : 'Làm Mới'}
+            </span>
+          </button>
+          {lastRefreshAt && !refreshing && !refreshError && (
+            <span className="leaderboard-refresh-time">
+              Cập nhật lúc {formatLastRefresh(lastRefreshAt)}
+            </span>
+          )}
+          {refreshError && (
+            <span className="leaderboard-refresh-error">{refreshError}</span>
+          )}
+        </div>
       </div>
 
       {/* ─── Filter bar ─── */}

@@ -26,6 +26,46 @@ logger = logging.getLogger("telemetry_seeder")
 # ============================================================================
 # Sensor Configuration (matches oracle_seed_v2.sql exactly)
 # ============================================================================
+def _make_extended_sensors() -> list:
+    """Generate the 63 sensors added by oracle_seed_extended.sql."""
+    extra = [
+        # (ward_id, cluster_id, base_lat, base_lng)
+        ('ward_q4_vinh_khanh',  'clst_q4',          10.7556, 106.7013),
+        ('ward_q4_vinh_hoi',    'clst_q4',          10.7635, 106.7008),
+        ('ward_q4_khanh_hoi',   'clst_q4',          10.7613, 106.7048),
+        ('ward_q7_tan_phong',   'clst_q7',          10.7286, 106.7186),
+        ('ward_q7_tan_phu',     'clst_q7',          10.7395, 106.7264),
+        ('ward_q7_tan_quy',     'clst_q7',          10.7378, 106.7158),
+        ('ward_q10_01',         'clst_q10',         10.7716, 106.6712),
+        ('ward_q10_02',         'clst_q10',         10.7702, 106.6644),
+        ('ward_q10_03',         'clst_q10',         10.7682, 106.6680),
+        ('ward_bt_01',          'clst_binh_thanh',  10.8003, 106.7160),
+        ('ward_bt_25',          'clst_binh_thanh',  10.8071, 106.7123),
+        ('ward_bt_26',          'clst_binh_thanh',  10.8049, 106.7088),
+        ('ward_tb_01',          'clst_tan_binh',    10.7984, 106.6551),
+        ('ward_tb_04',          'clst_tan_binh',    10.8048, 106.6530),
+        ('ward_tb_15',          'clst_tan_binh',    10.8025, 106.6485),
+        ('ward_pn_07',          'clst_phu_nhuan',   10.7965, 106.6789),
+        ('ward_pn_09',          'clst_phu_nhuan',   10.7989, 106.6815),
+        ('ward_pn_15',          'clst_phu_nhuan',   10.8016, 106.6816),
+        ('ward_gv_01',          'clst_go_vap',      10.8362, 106.6680),
+        ('ward_gv_05',          'clst_go_vap',      10.8412, 106.6635),
+        ('ward_gv_10',          'clst_go_vap',      10.8395, 106.6695),
+    ]
+    out = []
+    for ward_id, cluster_id, lat, lng in extra:
+        ward_suffix = ward_id.replace('ward_', '')
+        for n in range(1, 4):  # 3 sensors per ward
+            out.append({
+                'sensorId':   f'sen_{ward_suffix}_{n:02d}',
+                'locationId': ward_id,
+                'clusterId':  cluster_id,
+                'lat':        lat + (n - 2) * 0.0010,
+                'lng':        lng + (n - 2) * 0.0010,
+            })
+    return out
+
+
 SENSORS = [
     # District 1 – Ben Nghe Ward (cluster_q1_north)
     {"sensorId": "sen_q1_ben_nghe_01", "locationId": "ward_q1_ben_nghe", "clusterId": "cluster_q1_north", "lat": 10.7756, "lng": 106.7019},
@@ -69,19 +109,52 @@ SENSORS = [
     {"sensorId": "sen_q5_w3_01", "locationId": "ward_q5_03", "clusterId": "cluster_q5_west", "lat": 10.7578, "lng": 106.6701},
     {"sensorId": "sen_q5_w3_02", "locationId": "ward_q5_03", "clusterId": "cluster_q5_west", "lat": 10.7585, "lng": 106.6708},
     {"sensorId": "sen_q5_w3_03", "locationId": "ward_q5_03", "clusterId": "cluster_q5_west", "lat": 10.7571, "lng": 106.6694},
+    # ── 63 extended sensors (Q4/Q7/Q10/BT/TB/PN/GV) added programmatically ──
+    *_make_extended_sensors(),
 ]
 
-# Per-district pollution profiles (District 1 is busier/more polluted)
+# Per-ward pollution profiles — must mirror simulator.py WARD_PROFILES exactly.
 DISTRICT_PROFILES = {
+    # Q1 — downtown
     "ward_q1_ben_nghe":          {"co2": 480, "noise": 62, "temp": 29, "pm25": 45, "hum": 72},
     "ward_q1_ben_thanh":         {"co2": 520, "noise": 68, "temp": 30, "pm25": 52, "hum": 70},
     "ward_q1_nguyen_thai_binh":  {"co2": 460, "noise": 58, "temp": 29, "pm25": 40, "hum": 73},
+    # Q3 — midtown
     "ward_q3_01":                {"co2": 420, "noise": 55, "temp": 28, "pm25": 35, "hum": 75},
     "ward_q3_02":                {"co2": 410, "noise": 52, "temp": 28, "pm25": 33, "hum": 76},
     "ward_q3_03":                {"co2": 430, "noise": 54, "temp": 28, "pm25": 36, "hum": 74},
+    # Q5 — Cholon residential
     "ward_q5_01":                {"co2": 390, "noise": 48, "temp": 27, "pm25": 30, "hum": 78},
     "ward_q5_02":                {"co2": 380, "noise": 46, "temp": 27, "pm25": 28, "hum": 79},
     "ward_q5_03":                {"co2": 400, "noise": 50, "temp": 27, "pm25": 32, "hum": 77},
+    # Q4 — riverside, port adjacent
+    "ward_q4_vinh_khanh":        {"co2": 440, "noise": 56, "temp": 28, "pm25": 38, "hum": 76},
+    "ward_q4_vinh_hoi":          {"co2": 450, "noise": 58, "temp": 28, "pm25": 40, "hum": 76},
+    "ward_q4_khanh_hoi":         {"co2": 470, "noise": 60, "temp": 29, "pm25": 42, "hum": 75},
+    # Q7 — Phú Mỹ Hưng, modern, cleaner
+    "ward_q7_tan_phong":         {"co2": 360, "noise": 44, "temp": 27, "pm25": 26, "hum": 80},
+    "ward_q7_tan_phu":           {"co2": 370, "noise": 46, "temp": 27, "pm25": 28, "hum": 80},
+    "ward_q7_tan_quy":           {"co2": 380, "noise": 48, "temp": 27, "pm25": 30, "hum": 79},
+    # Q10 — residential mix
+    "ward_q10_01":               {"co2": 410, "noise": 53, "temp": 28, "pm25": 34, "hum": 76},
+    "ward_q10_02":               {"co2": 405, "noise": 51, "temp": 28, "pm25": 33, "hum": 76},
+    "ward_q10_03":               {"co2": 415, "noise": 54, "temp": 28, "pm25": 35, "hum": 75},
+    # Bình Thạnh — busy mixed-use
+    "ward_bt_01":                {"co2": 470, "noise": 60, "temp": 29, "pm25": 42, "hum": 73},
+    "ward_bt_25":                {"co2": 490, "noise": 64, "temp": 29, "pm25": 46, "hum": 72},
+    "ward_bt_26":                {"co2": 460, "noise": 58, "temp": 29, "pm25": 40, "hum": 73},
+    # Tân Bình — airport adjacent, dense
+    "ward_tb_01":                {"co2": 510, "noise": 70, "temp": 30, "pm25": 50, "hum": 71},
+    "ward_tb_04":                {"co2": 500, "noise": 68, "temp": 30, "pm25": 48, "hum": 71},
+    "ward_tb_15":                {"co2": 495, "noise": 66, "temp": 30, "pm25": 47, "hum": 72},
+    # Phú Nhuận — leafy residential
+    "ward_pn_07":                {"co2": 395, "noise": 49, "temp": 28, "pm25": 31, "hum": 78},
+    "ward_pn_09":                {"co2": 400, "noise": 50, "temp": 28, "pm25": 32, "hum": 77},
+    "ward_pn_15":                {"co2": 405, "noise": 51, "temp": 28, "pm25": 33, "hum": 77},
+    # Gò Vấp — suburban
+    "ward_gv_01":                {"co2": 385, "noise": 47, "temp": 27, "pm25": 28, "hum": 79},
+    "ward_gv_05":                {"co2": 380, "noise": 46, "temp": 27, "pm25": 27, "hum": 80},
+    "ward_gv_10":                {"co2": 390, "noise": 48, "temp": 27, "pm25": 30, "hum": 79},
 }
 
 # ============================================================================
@@ -135,7 +208,7 @@ def generate_metrics(ts: datetime, profile: dict) -> dict:
 
 def build_document(sensor: dict, ts: datetime) -> dict:
     """Build a single MongoDB telemetry document."""
-    profile = DISTRICT_PROFILES.get(sensor["locationId"], DISTRICT_PROFILES["ward_q5_01"])
+    profile = DISTRICT_PROFILES.get(sensor["locationId"], DISTRICT_PROFILES["ward_q3_01"])
     metrics = generate_metrics(ts, profile)
     received = ts + timedelta(seconds=random.uniform(0.1, 1.5))
     expire = ts + timedelta(days=TTL_DAYS)
