@@ -479,7 +479,11 @@ async def get_telemetry(
     sensor_id: str,
     start_time: Optional[datetime] = Query(None, description="ISO 8601 start"),
     end_time:   Optional[datetime] = Query(None, description="ISO 8601 end"),
-    limit:      int = Query(100, ge=1, le=1000),
+    limit:      int = Query(100, ge=1, le=2000),
+    bucket_minutes: Optional[int] = Query(
+        None, ge=1, le=10080,
+        description="Aggregation bucket size in minutes. Overrides the auto-bucketing heuristic.",
+    ),
     cluster_id: Optional[str] = Query(None, description="Filter — only return if sensor is in this cluster"),
     near_lat:   Optional[float] = Query(None, description="Geospatial filter — latitude"),
     near_lng:   Optional[float] = Query(None, description="Geospatial filter — longitude"),
@@ -530,7 +534,13 @@ async def get_telemetry(
         mongo = get_mongodb_client()
         time_delta = end_time - start_time if start_time and end_time else None
 
-        if time_delta and time_delta.total_seconds() > 8 * 3600:
+        # Explicit bucket override — used by long-range views (year, month).
+        if bucket_minutes is not None:
+            docs = mongo.query_telemetry_aggregated(
+                sensor_id=sensor_id, start_time=start_time,
+                end_time=end_time, bucket_minutes=bucket_minutes,
+            )
+        elif time_delta and time_delta.total_seconds() > 8 * 3600:
             docs = mongo.query_telemetry_aggregated(
                 sensor_id=sensor_id, start_time=start_time,
                 end_time=end_time, bucket_minutes=5,
@@ -696,3 +706,82 @@ async def get_leaderboard(limit: int = Query(100, ge=1, le=1000)):
     except Exception as exc:
         logger.error(f"get_leaderboard error: {exc}")
         raise HTTPException(500, f"Failed to retrieve leaderboard: {exc}")
+
+
+# ============================================================================
+# Historical summary (Oracle TELEMETRY_SUMMARY)
+# ============================================================================
+@router.get("/locations/{location_id}/history", summary="Historical telemetry summary for a location")
+async def get_location_history(
+    location_id: str,
+    granularity: str = Query("HOURLY", regex="^(HOURLY|DAILY|WEEKLY)$"),
+    start_time: Optional[datetime] = Query(None),
+    end_time:   Optional[datetime] = Query(None),
+):
+    """
+    Return pre-aggregated telemetry summaries from Oracle TELEMETRY_SUMMARY
+    for a location (city / district / ward) at the requested granularity.
+
+    Granularity:
+      - HOURLY: 1-hour buckets — best for "Hôm nay" and "Tuần"
+      - DAILY:  1-day buckets — best for "Tháng" and "Năm"
+      - WEEKLY: 1-week buckets — coarse year overview
+    """
+    try:
+        if not end_time:
+            end_time = datetime.now(timezone.utc)
+        if not start_time:
+            default_days = {"HOURLY": 7, "DAILY": 30, "WEEKLY": 365}.get(granularity, 7)
+            start_time = end_time - timedelta(days=default_days)
+
+        oracle = get_oracle_client()
+        conn = oracle._pool.acquire()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT TimeBucket, AvgPM25, MaxPM25,
+                       AvgCO2, MaxCO2, MinCO2,
+                       AvgNoise, MaxNoise, MinNoise,
+                       AvgTemperature, MaxTemperature, MinTemperature,
+                       AvgHumidity, AQI, CleanScore, DataPoints
+                  FROM TELEMETRY_SUMMARY
+                 WHERE LocationID = :loc
+                   AND Granularity = :gran
+                   AND TimeBucket BETWEEN :s AND :e
+                 ORDER BY TimeBucket
+                """,
+                {"loc": location_id, "gran": granularity, "s": start_time, "e": end_time},
+            )
+            rows = cur.fetchall()
+            cur.close()
+        finally:
+            oracle._pool.release(conn)
+
+        result = []
+        for r in rows:
+            (tb, avg_pm25, max_pm25, avg_co2, max_co2, min_co2,
+             avg_noise, max_noise, min_noise, avg_temp, max_temp, min_temp,
+             avg_hum, aqi, clean, n) = r
+            result.append({
+                "timeBucket": tb.isoformat() if tb else None,
+                "avgPM25": float(avg_pm25) if avg_pm25 is not None else None,
+                "maxPM25": float(max_pm25) if max_pm25 is not None else None,
+                "avgCO2": float(avg_co2) if avg_co2 is not None else None,
+                "maxCO2": float(max_co2) if max_co2 is not None else None,
+                "minCO2": float(min_co2) if min_co2 is not None else None,
+                "avgNoise": float(avg_noise) if avg_noise is not None else None,
+                "maxNoise": float(max_noise) if max_noise is not None else None,
+                "minNoise": float(min_noise) if min_noise is not None else None,
+                "avgTemperature": float(avg_temp) if avg_temp is not None else None,
+                "maxTemperature": float(max_temp) if max_temp is not None else None,
+                "minTemperature": float(min_temp) if min_temp is not None else None,
+                "avgHumidity": float(avg_hum) if avg_hum is not None else None,
+                "aqi": int(aqi) if aqi is not None else None,
+                "cleanScore": int(clean) if clean is not None else None,
+                "dataPoints": int(n) if n is not None else 0,
+            })
+        return result
+    except Exception as exc:
+        logger.error(f"get_location_history({location_id}) error: {exc}")
+        raise HTTPException(500, f"Failed to retrieve history: {exc}")

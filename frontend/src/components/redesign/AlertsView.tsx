@@ -1,7 +1,10 @@
 import React from 'react';
-import { MapPin, Check, CheckCircle2 } from 'lucide-react';
+import { MapPin, Check, CheckCircle2, Eye } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
+import { formatLocationName } from '../../utils/location';
 import type { Alert as ApiAlert } from '../../types';
+import type { MapFocusTarget } from './types';
+import PredictiveDetailModal from './alerts/PredictiveDetailModal';
 
 const formatThreshold = (alert: ApiAlert): string => {
   if (alert.threshold !== null && alert.threshold !== undefined) {
@@ -23,26 +26,38 @@ const formatThreshold = (alert: ApiAlert): string => {
   }
 };
 
-const AlertsView: React.FC = () => {
-  const { alerts, acknowledgeAlert, resolveAlert } = useAppContext();
+interface AlertsViewProps {
+  onFocusOnMap?: (target: MapFocusTarget) => void;
+}
+
+const AlertsView: React.FC<AlertsViewProps> = ({ onFocusOnMap }) => {
+  const { alerts, sensors, locations, acknowledgeAlert, resolveAlert } = useAppContext();
   const [severityFilter, setSeverityFilter] = React.useState<string>('all');
   const [typeFilter, setTypeFilter] = React.useState<string>('all');
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [predictiveDetailAlert, setPredictiveDetailAlert] = React.useState<ApiAlert | null>(null);
 
   // Map alerts to display format
-  let displayAlerts = alerts.map((alert) => ({
-    raw: alert,
-    id: alert.alertId,
-    title: `Nồng độ ${alert.metricType} ${alert.severity === 'CRITICAL' ? 'nghiêm trọng' : 'cao'} tại ${alert.locationId}`,
-    location: alert.locationId,
-    time: new Date(alert.createdAt).toLocaleString('vi-VN'),
-    severity: (alert.severity || 'LOW').toLowerCase(),
-    type: (alert.alertType || 'THRESHOLD').toLowerCase(),
-    status: (alert.status || 'OPEN').toLowerCase(),
-    metric: alert.metricType,
-    value: alert.value,
-    threshold: formatThreshold(alert),
-  }));
+  let displayAlerts = alerts.map((alert) => {
+    const locationName = formatLocationName(alert.locationId, locations);
+    return {
+      raw: alert,
+      id: alert.alertId,
+      sensorId: alert.sensorId ?? null,
+      locationId: alert.locationId,
+      title: `Nồng độ ${alert.metricType} ${
+        alert.severity === 'CRITICAL' ? 'nghiêm trọng' : 'cao'
+      } tại ${locationName}`,
+      location: locationName,
+      time: new Date(alert.createdAt).toLocaleString('vi-VN'),
+      severity: (alert.severity || 'LOW').toLowerCase(),
+      type: (alert.alertType || 'THRESHOLD').toLowerCase(),
+      status: (alert.status || 'OPEN').toLowerCase(),
+      metric: alert.metricType,
+      value: alert.value,
+      threshold: formatThreshold(alert),
+    };
+  });
 
   if (severityFilter !== 'all') {
     displayAlerts = displayAlerts.filter((a) => a.severity === severityFilter);
@@ -69,8 +84,25 @@ const AlertsView: React.FC = () => {
     }
   };
 
-  const handleLocate = (location: string) => {
-    console.log('Locating:', location);
+  const handleLocate = (sensorId: string | null, locationId: string) => {
+    if (!onFocusOnMap) return;
+    // Prefer the sensor coordinates (precise pin) if we have them.
+    if (sensorId) {
+      const sensor = sensors.find((s) => s.sensorId === sensorId);
+      if (sensor && sensor.latitude != null && sensor.longitude != null) {
+        onFocusOnMap({ lat: sensor.latitude, lng: sensor.longitude, zoom: 15 });
+        return;
+      }
+    }
+    // Fall back to the location's center coordinates if available.
+    const loc = locations.find((l) => l.locationId === locationId);
+    if (loc && loc.centerLat != null && loc.centerLng != null) {
+      onFocusOnMap({
+        lat: loc.centerLat,
+        lng: loc.centerLng,
+        zoom: loc.type === 'Ward' ? 15 : 13,
+      });
+    }
   };
 
   const getSeverityColor = (severity: string) => {
@@ -224,9 +256,19 @@ const AlertsView: React.FC = () => {
                   </span>
                 </div>
                 <div className="alert-actions">
+                  {alert.type === 'predictive' && (
+                    <button
+                      className="alert-action-btn predictive-detail-btn"
+                      onClick={() => setPredictiveDetailAlert(alert.raw)}
+                      title="Xem chi tiết phân tích dự đoán"
+                    >
+                      <Eye className="w-4 h-4" />
+                      <span>Xem Chi Tiết</span>
+                    </button>
+                  )}
                   <button
                     className="alert-action-btn"
-                    onClick={() => handleLocate(alert.location)}
+                    onClick={() => handleLocate(alert.sensorId, alert.locationId)}
                   >
                     <MapPin className="w-4 h-4" />
                     <span>Định Vị</span>
@@ -279,6 +321,13 @@ const AlertsView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {predictiveDetailAlert && (
+        <PredictiveDetailModal
+          alert={predictiveDetailAlert}
+          onClose={() => setPredictiveDetailAlert(null)}
+        />
+      )}
     </div>
   );
 };

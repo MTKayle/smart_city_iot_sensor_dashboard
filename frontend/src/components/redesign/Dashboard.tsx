@@ -4,15 +4,17 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { useAppContext } from '../../context/AppContext';
 import { fetchTelemetry } from '../../services/api';
 import type { Telemetry } from '../../types';
+import { formatLocationName } from '../../utils/location';
 
-import type { ViewType } from './types';
+import type { ViewType, MapFocusTarget } from './types';
 
 interface DashboardProps {
   onNavigate?: (view: ViewType) => void;
+  onFocusOnMap?: (target: MapFocusTarget) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
-  const { sensors, alerts, telemetryMap, connectionStatus } = useAppContext();
+const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onFocusOnMap }) => {
+  const { sensors, alerts, telemetryMap, connectionStatus, locations } = useAppContext();
   const [pm25Data, setPm25Data] = useState<Array<{ time: string; value: number }>>([]);
 
   // Load PM2.5 trend data from first sensor
@@ -90,10 +92,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     .slice(0, 2)
     .map(a => ({
       id: a.alertId,
-      location: a.locationId,
+      sensorId: a.sensorId ?? null,
+      location: formatLocationName(a.locationId, locations),
       message: `${a.metricType} ${a.value.toFixed(1)} vượt ngưỡng`,
       time: new Date(a.createdAt).toLocaleTimeString('vi-VN'),
     }));
+
+  const handleAlertClick = (sensorId: string | null) => {
+    if (!sensorId || !onFocusOnMap) return;
+    const sensor = sensors.find((s) => s.sensorId === sensorId);
+    if (!sensor || sensor.latitude == null || sensor.longitude == null) return;
+    onFocusOnMap({ lat: sensor.latitude, lng: sensor.longitude, zoom: 15 });
+  };
 
   return (
     <div className="dashboard-view">
@@ -212,7 +222,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           <div className="alerts-list">
             {criticalAlerts.length > 0 ? (
               criticalAlerts.map((alert) => (
-                <div key={alert.id} className="alert-item">
+                <div
+                  key={alert.id}
+                  className="alert-item"
+                  onClick={() => handleAlertClick(alert.sensorId)}
+                  style={{ cursor: alert.sensorId ? 'pointer' : 'default' }}
+                  title={alert.sensorId ? 'Xem trên bản đồ' : ''}
+                >
                   <div className="alert-content">
                     <h4 className="alert-location">{alert.location}</h4>
                     <p className="alert-message">{alert.message}</p>

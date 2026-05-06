@@ -1,6 +1,14 @@
 """
 Telemetry Data Seeder for Smart City IoT Dashboard.
-Generates 7 days of realistic telemetry data for all 33 sensors.
+
+Generates a full year of realistic telemetry across two resolutions so the
+analytics views (Today / Week / Month / Year) all have proper data without
+exploding MongoDB:
+
+  • Last 30 days  → 5-min resolution (full detail for live & trend views)
+  • Days 30 → 365 → 1-hour resolution (sufficient for monthly / yearly views)
+
+Total: ~550 K documents for 33 sensors.
 
 Usage:
     python -m app.db.seed_telemetry
@@ -79,9 +87,11 @@ DISTRICT_PROFILES = {
 # ============================================================================
 # Data Generation
 # ============================================================================
-INTERVAL_MINUTES = 5    # One reading every 5 minutes
-DAYS = 7                # 7 days of historical data
-TTL_DAYS = 30           # MongoDB TTL expiration
+INTERVAL_RECENT_MIN = 5     # 5-min resolution for the recent window
+INTERVAL_LEGACY_MIN = 60    # 1-hour resolution for older data (months 1-12)
+DAYS_RECENT = 30            # high-res window covering today / week / month views
+DAYS_TOTAL = 365            # one full year for the year view
+TTL_DAYS = 380              # TTL slightly longer than DAYS_TOTAL
 
 def generate_metrics(ts: datetime, profile: dict) -> dict:
     """Generate realistic sensor metrics with diurnal patterns."""
@@ -191,36 +201,48 @@ def seed(mongodb_uri: str = None):
         return
 
     # ------------------------------------------------------------------
-    # 3. Generate & insert data
+    # 3. Generate & insert data — two passes for tiered resolution
     # ------------------------------------------------------------------
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    start = now - timedelta(days=DAYS)
+    legacy_start = now - timedelta(days=DAYS_TOTAL)
+    legacy_end   = now - timedelta(days=DAYS_RECENT)
+    recent_start = legacy_end
 
-    total_readings = int(DAYS * 24 * 60 / INTERVAL_MINUTES)  # per sensor
-    total_docs = total_readings * len(SENSORS)
-    logger.info(f"Generating {total_docs} telemetry documents ({len(SENSORS)} sensors x {total_readings} readings)...")
+    legacy_readings = int((DAYS_TOTAL - DAYS_RECENT) * 24 * 60 / INTERVAL_LEGACY_MIN)
+    recent_readings = int(DAYS_RECENT * 24 * 60 / INTERVAL_RECENT_MIN)
+    total_docs = (legacy_readings + recent_readings) * len(SENSORS)
+    logger.info(
+        f"Generating {total_docs} telemetry documents — "
+        f"{legacy_readings} hourly + {recent_readings} 5-minute readings × {len(SENSORS)} sensors"
+    )
 
-    batch = []
     BATCH_SIZE = 2000
+    batch = []
     inserted_total = 0
     duplicates_total = 0
     t0 = time.time()
 
-    for i in range(total_readings):
-        ts = start + timedelta(minutes=i * INTERVAL_MINUTES)
+    def emit(ts: datetime):
+        nonlocal batch, inserted_total, duplicates_total
         for sensor in SENSORS:
             batch.append(build_document(sensor, ts))
-
             if len(batch) >= BATCH_SIZE:
                 ins, dup = _flush(col, batch)
                 inserted_total += ins
                 duplicates_total += dup
                 batch = []
-
-                if inserted_total % 10000 < BATCH_SIZE:
+                if inserted_total % 50000 < BATCH_SIZE:
                     elapsed = time.time() - t0
                     pct = inserted_total / total_docs * 100
                     logger.info(f"  Progress: {inserted_total}/{total_docs} ({pct:.0f}%) – {elapsed:.1f}s")
+
+    # Legacy / coarse pass first (older → recent so timestamps stay ordered)
+    for i in range(legacy_readings):
+        emit(legacy_start + timedelta(minutes=i * INTERVAL_LEGACY_MIN))
+
+    # Recent / fine pass
+    for i in range(recent_readings):
+        emit(recent_start + timedelta(minutes=i * INTERVAL_RECENT_MIN))
 
     # Flush remaining
     if batch:

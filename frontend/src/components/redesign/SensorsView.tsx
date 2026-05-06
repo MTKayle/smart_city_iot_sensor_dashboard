@@ -1,11 +1,29 @@
-import React, { useState } from 'react';
-import { Search, MapPin, Battery, Signal } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Search, MapPin, Battery, Signal, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
 import { classifySensorStatus } from '../../utils/telemetry';
+import { formatLocationName } from '../../utils/location';
+import type { MapFocusTarget } from './types';
 
-const SensorsView: React.FC = () => {
+type SortKey = 'name' | 'status' | 'pm25' | 'temp' | 'humidity' | 'co2' | 'noise' | 'battery' | 'signal';
+type SortDir = 'asc' | 'desc';
+
+interface SensorsViewProps {
+  onFocusOnMap?: (target: MapFocusTarget) => void;
+}
+
+const STATUS_RANK: Record<string, number> = {
+  critical: 0,
+  warning: 1,
+  normal: 2,
+  pending: 3,
+};
+
+const SensorsView: React.FC<SensorsViewProps> = ({ onFocusOnMap }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const { sensors, telemetryMap } = useAppContext();
+  const [sortKey, setSortKey] = useState<SortKey>('status');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const { sensors, telemetryMap, locations } = useAppContext();
 
   // Map sensors with telemetry data — pull from quality.* when available.
   const sensorsWithData = sensors.map((sensor) => {
@@ -30,7 +48,9 @@ const SensorsView: React.FC = () => {
 
     return {
       id: sensor.sensorId,
-      name: sensor.locationId || sensor.sensorId,
+      name: formatLocationName(sensor.locationId, locations),
+      lat: sensor.latitude ?? null,
+      lng: sensor.longitude ?? null,
       status,
       pm25,
       co2,
@@ -43,14 +63,60 @@ const SensorsView: React.FC = () => {
     };
   });
 
-  const filteredSensors = sensorsWithData.filter(
-    (sensor) =>
-      sensor.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      sensor.id.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
+  const filteredSensors = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    const list = sensorsWithData.filter(
+      (sensor) =>
+        sensor.name.toLowerCase().includes(q) ||
+        sensor.id.toLowerCase().includes(q),
+    );
 
-  const handleViewOnMap = (sensorId: string) => {
-    console.log('View sensor on map:', sensorId);
+    const cmp = (a: typeof list[number], b: typeof list[number]): number => {
+      const dir = sortDir === 'asc' ? 1 : -1;
+      const pickNum = (v: number | null): number =>
+        v === null || v === undefined || isNaN(v) ? Number.POSITIVE_INFINITY : v;
+
+      switch (sortKey) {
+        case 'name':
+          return a.name.localeCompare(b.name) * dir;
+        case 'status': {
+          const aKey = a.hasTelemetry ? STATUS_RANK[a.status] ?? 9 : STATUS_RANK.pending;
+          const bKey = b.hasTelemetry ? STATUS_RANK[b.status] ?? 9 : STATUS_RANK.pending;
+          return (aKey - bKey) * dir;
+        }
+        case 'pm25':     return (pickNum(a.pm25)     - pickNum(b.pm25))     * dir;
+        case 'temp':     return (pickNum(a.temp)     - pickNum(b.temp))     * dir;
+        case 'humidity': return (pickNum(a.humidity) - pickNum(b.humidity)) * dir;
+        case 'co2':      return (pickNum(a.co2)      - pickNum(b.co2))      * dir;
+        case 'noise':    return (pickNum(a.noise)    - pickNum(b.noise))    * dir;
+        case 'battery':  return (pickNum(a.battery)  - pickNum(b.battery))  * dir;
+        case 'signal':   return (pickNum(a.signal)   - pickNum(b.signal))   * dir;
+        default: return 0;
+      }
+    };
+
+    return [...list].sort(cmp);
+  }, [sensorsWithData, searchQuery, sortKey, sortDir]);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const sortIcon = (key: SortKey) => {
+    if (sortKey !== key) return <ArrowUpDown className="w-3 h-3 sort-icon" />;
+    return sortDir === 'asc'
+      ? <ArrowUp className="w-3 h-3 sort-icon active" />
+      : <ArrowDown className="w-3 h-3 sort-icon active" />;
+  };
+
+  const handleViewOnMap = (sensor: typeof filteredSensors[number]) => {
+    if (!onFocusOnMap || sensor.lat == null || sensor.lng == null) return;
+    onFocusOnMap({ lat: sensor.lat, lng: sensor.lng, zoom: 15 });
   };
 
   const getStatusColor = (status: string) => {
@@ -134,15 +200,33 @@ const SensorsView: React.FC = () => {
         <table className="data-table">
           <thead>
             <tr>
-              <th>Cảm Biến</th>
-              <th>Trạng Thái</th>
-              <th>PM2.5</th>
-              <th>Nhiệt Độ</th>
-              <th>Độ Ẩm</th>
-              <th>CO2</th>
-              <th>Tiếng Ồn</th>
-              <th>Pin</th>
-              <th>Tín Hiệu</th>
+              <th className="sortable" onClick={() => handleSort('name')}>
+                <span className="th-content">Cảm Biến {sortIcon('name')}</span>
+              </th>
+              <th className="sortable" onClick={() => handleSort('status')}>
+                <span className="th-content">Trạng Thái {sortIcon('status')}</span>
+              </th>
+              <th className="sortable" onClick={() => handleSort('pm25')}>
+                <span className="th-content">PM2.5 {sortIcon('pm25')}</span>
+              </th>
+              <th className="sortable" onClick={() => handleSort('temp')}>
+                <span className="th-content">Nhiệt Độ {sortIcon('temp')}</span>
+              </th>
+              <th className="sortable" onClick={() => handleSort('humidity')}>
+                <span className="th-content">Độ Ẩm {sortIcon('humidity')}</span>
+              </th>
+              <th className="sortable" onClick={() => handleSort('co2')}>
+                <span className="th-content">CO2 {sortIcon('co2')}</span>
+              </th>
+              <th className="sortable" onClick={() => handleSort('noise')}>
+                <span className="th-content">Tiếng Ồn {sortIcon('noise')}</span>
+              </th>
+              <th className="sortable" onClick={() => handleSort('battery')}>
+                <span className="th-content">Pin {sortIcon('battery')}</span>
+              </th>
+              <th className="sortable" onClick={() => handleSort('signal')}>
+                <span className="th-content">Tín Hiệu {sortIcon('signal')}</span>
+              </th>
               <th>Hành Động</th>
             </tr>
           </thead>
@@ -190,7 +274,8 @@ const SensorsView: React.FC = () => {
                 <td>
                   <button
                     className="action-btn"
-                    onClick={() => handleViewOnMap(sensor.id)}
+                    onClick={() => handleViewOnMap(sensor)}
+                    disabled={sensor.lat == null || sensor.lng == null}
                     title="Xem trên bản đồ"
                   >
                     <MapPin className="w-4 h-4" />

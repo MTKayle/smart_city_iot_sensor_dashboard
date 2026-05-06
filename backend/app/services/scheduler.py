@@ -28,9 +28,11 @@ from typing import Any, Dict, List, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.db.mongodb_client import get_mongodb_client
 from app.db.oracle_client import get_oracle_client
+from app.db.aggregate_summary import aggregate as aggregate_summary
 from app.services.analytics_service import get_analytics_service
 
 # Configure logging
@@ -115,6 +117,66 @@ class AnalyticsScheduler:
             misfire_grace_time=600,
         )
         logger.info("Configured job: hourly_cluster_aggregation (every hour)")
+
+        # ─── DEMO INTERVALS (rút ngắn để dễ thấy trong demo) ───
+        # MongoDB raw → Oracle TELEMETRY_SUMMARY pipeline.
+        # Trong production các interval này nên tăng lên (10 phút / 2 giờ / 1 ngày)
+        # vì re-aggregating quá thường xuyên là phí compute.
+
+        # Job: HOURLY granularity — chạy mỗi 1 phút, aggregate 2 ngày gần nhất.
+        self.scheduler.add_job(
+            func=lambda: self._run_summary_aggregator("HOURLY", days=2),
+            trigger=IntervalTrigger(minutes=1),
+            id="summary_hourly_aggregation",
+            name="Aggregate raw MongoDB telemetry → Oracle TELEMETRY_SUMMARY (HOURLY)",
+            replace_existing=True,
+            misfire_grace_time=120,
+            next_run_time=datetime.utcnow() + timedelta(seconds=30),
+        )
+        logger.info("Configured job: summary_hourly_aggregation (every 1 minute, demo)")
+
+        # Job: DAILY granularity — chạy mỗi 2 phút, aggregate 7 ngày gần nhất.
+        self.scheduler.add_job(
+            func=lambda: self._run_summary_aggregator("DAILY", days=7),
+            trigger=IntervalTrigger(minutes=2),
+            id="summary_daily_aggregation",
+            name="Aggregate raw MongoDB telemetry → Oracle TELEMETRY_SUMMARY (DAILY)",
+            replace_existing=True,
+            misfire_grace_time=120,
+            next_run_time=datetime.utcnow() + timedelta(seconds=60),
+        )
+        logger.info("Configured job: summary_daily_aggregation (every 2 minutes, demo)")
+
+        # Job: WEEKLY granularity — chạy mỗi 5 phút, aggregate 90 ngày gần nhất.
+        self.scheduler.add_job(
+            func=lambda: self._run_summary_aggregator("WEEKLY", days=90),
+            trigger=IntervalTrigger(minutes=5),
+            id="summary_weekly_aggregation",
+            name="Aggregate raw MongoDB telemetry → Oracle TELEMETRY_SUMMARY (WEEKLY)",
+            replace_existing=True,
+            misfire_grace_time=300,
+            next_run_time=datetime.utcnow() + timedelta(seconds=120),
+        )
+        logger.info("Configured job: summary_weekly_aggregation (every 5 minutes, demo)")
+
+    # ------------------------------------------------------------------ #
+    # MongoDB raw → Oracle TELEMETRY_SUMMARY                              #
+    # ------------------------------------------------------------------ #
+    def _run_summary_aggregator(self, granularity: str, days: int) -> None:
+        """Wrapper that wires the aggregator into the scheduler with telemetry."""
+        t0 = time.perf_counter()
+        logger.info(f"[scheduler] Starting summary_{granularity.lower()}_aggregation …")
+        try:
+            aggregate_summary(granularity, days)
+            logger.info(
+                f"[scheduler] summary_{granularity.lower()}_aggregation completed "
+                f"in {time.perf_counter() - t0:.1f}s"
+            )
+        except Exception as e:
+            logger.error(
+                f"[scheduler] summary_{granularity.lower()}_aggregation failed: {e}",
+                exc_info=True,
+            )
 
     # ------------------------------------------------------------------ #
     # 8.1 — Daily location-level Clean Score job                          #

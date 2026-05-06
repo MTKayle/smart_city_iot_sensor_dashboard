@@ -10,49 +10,49 @@
 
 -- City level
 INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES ('city_hcmc', 'Ho Chi Minh City', NULL, 'City', 10.8231, 106.6297, 2095.0, 9000000);
+VALUES ('city_hcmc', N'Thành phố Hồ Chí Minh', NULL, 'City', 10.8231, 106.6297, 2095.0, 9000000);
 
 -- District 1
 INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES ('district_q1', 'District 1', 'city_hcmc', 'District', 10.7756, 106.7019, 7.73, 204899);
+VALUES ('district_q1', N'Quận 1', 'city_hcmc', 'District', 10.7756, 106.7019, 7.73, 204899);
 
 -- District 3
 INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES ('district_q3', 'District 3', 'city_hcmc', 'District', 10.7866, 106.6828, 4.92, 188029);
+VALUES ('district_q3', N'Quận 3', 'city_hcmc', 'District', 10.7866, 106.6828, 4.92, 188029);
 
 -- District 5
 INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES ('district_q5', 'District 5', 'city_hcmc', 'District', 10.7545, 106.6664, 4.27, 179262);
+VALUES ('district_q5', N'Quận 5', 'city_hcmc', 'District', 10.7545, 106.6664, 4.27, 179262);
 
 -- Wards in District 1
 INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES ('ward_q1_ben_nghe', 'Ben Nghe Ward', 'district_q1', 'Ward', 10.7756, 106.7019, 0.89, 18500);
+VALUES ('ward_q1_ben_nghe', N'Phường Bến Nghé', 'district_q1', 'Ward', 10.7756, 106.7019, 0.89, 18500);
 
 INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES ('ward_q1_ben_thanh', 'Ben Thanh Ward', 'district_q1', 'Ward', 10.7721, 106.6983, 0.52, 15200);
+VALUES ('ward_q1_ben_thanh', N'Phường Bến Thành', 'district_q1', 'Ward', 10.7721, 106.6983, 0.52, 15200);
 
 INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES ('ward_q1_nguyen_thai_binh', 'Nguyen Thai Binh Ward', 'district_q1', 'Ward', 10.7689, 106.6945, 0.48, 14800);
+VALUES ('ward_q1_nguyen_thai_binh', N'Phường Nguyễn Thái Bình', 'district_q1', 'Ward', 10.7689, 106.6945, 0.48, 14800);
 
 -- Wards in District 3
 INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES ('ward_q3_01', 'Ward 1', 'district_q3', 'Ward', 10.7866, 106.6828, 0.45, 16500);
+VALUES ('ward_q3_01', N'Phường 1', 'district_q3', 'Ward', 10.7866, 106.6828, 0.45, 16500);
 
 INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES ('ward_q3_02', 'Ward 2', 'district_q3', 'Ward', 10.7823, 106.6789, 0.38, 14200);
+VALUES ('ward_q3_02', N'Phường 2', 'district_q3', 'Ward', 10.7823, 106.6789, 0.38, 14200);
 
 INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES ('ward_q3_03', 'Ward 3', 'district_q3', 'Ward', 10.7901, 106.6856, 0.42, 15800);
+VALUES ('ward_q3_03', N'Phường 3', 'district_q3', 'Ward', 10.7901, 106.6856, 0.42, 15800);
 
 -- Wards in District 5
 INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES ('ward_q5_01', 'Ward 1', 'district_q5', 'Ward', 10.7545, 106.6664, 0.35, 13500);
+VALUES ('ward_q5_01', N'Phường 1', 'district_q5', 'Ward', 10.7545, 106.6664, 0.35, 13500);
 
 INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES ('ward_q5_02', 'Ward 2', 'district_q5', 'Ward', 10.7512, 106.6623, 0.32, 12800);
+VALUES ('ward_q5_02', N'Phường 2', 'district_q5', 'Ward', 10.7512, 106.6623, 0.32, 12800);
 
 INSERT INTO LOCATIONS (LocationID, Name, ParentID, Type, CenterLat, CenterLng, Area, Population)
-VALUES ('ward_q5_03', 'Ward 3', 'district_q5', 'Ward', 10.7578, 106.6701, 0.38, 14100);
+VALUES ('ward_q5_03', N'Phường 3', 'district_q5', 'Ward', 10.7578, 106.6701, 0.38, 14100);
 
 COMMIT;
 
@@ -63,18 +63,18 @@ COMMIT;
 
 -- District 1 clusters
 INSERT INTO SENSOR_CLUSTERS (ClusterID, LocationID, ClusterName, CenterLat, CenterLng, Radius, Algorithm)
-VALUES ('cluster_q1_north', 'district_q1', 'District 1 North Cluster', 10.7780, 106.7030, 300, 'GRID');
+VALUES ('cluster_q1_north', 'district_q1', N'Cụm Bắc Quận 1', 10.7780, 106.7030, 300, 'GRID');
 
 INSERT INTO SENSOR_CLUSTERS (ClusterID, LocationID, ClusterName, CenterLat, CenterLng, Radius, Algorithm)
-VALUES ('cluster_q1_south', 'district_q1', 'District 1 South Cluster', 10.7720, 106.6990, 300, 'GRID');
+VALUES ('cluster_q1_south', 'district_q1', N'Cụm Nam Quận 1', 10.7720, 106.6990, 300, 'GRID');
 
 -- District 3 clusters
 INSERT INTO SENSOR_CLUSTERS (ClusterID, LocationID, ClusterName, CenterLat, CenterLng, Radius, Algorithm)
-VALUES ('cluster_q3_central', 'district_q3', 'District 3 Central Cluster', 10.7866, 106.6828, 300, 'GRID');
+VALUES ('cluster_q3_central', 'district_q3', N'Cụm Trung Tâm Quận 3', 10.7866, 106.6828, 300, 'GRID');
 
 -- District 5 clusters
 INSERT INTO SENSOR_CLUSTERS (ClusterID, LocationID, ClusterName, CenterLat, CenterLng, Radius, Algorithm)
-VALUES ('cluster_q5_west', 'district_q5', 'District 5 West Cluster', 10.7545, 106.6664, 300, 'GRID');
+VALUES ('cluster_q5_west', 'district_q5', N'Cụm Tây Quận 5', 10.7545, 106.6664, 300, 'GRID');
 
 COMMIT;
 

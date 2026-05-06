@@ -3,12 +3,17 @@ import { MapPin } from 'lucide-react';
 import { fetchClusterTelemetry } from '../../services/api';
 import { useAppContext } from '../../context/AppContext';
 import type { SensorCluster, ClusterAnalytics } from '../../types';
+import type { MapFocusTarget } from './types';
 
 interface ClusterWithAnalytics extends SensorCluster {
   analytics?: ClusterAnalytics;
 }
 
-const ClustersView: React.FC = () => {
+interface ClustersViewProps {
+  onFocusOnMap?: (target: MapFocusTarget) => void;
+}
+
+const ClustersView: React.FC<ClustersViewProps> = ({ onFocusOnMap }) => {
   const { clusters: contextClusters } = useAppContext();
   const [clusters, setClusters] = useState<ClusterWithAnalytics[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,9 +52,14 @@ const ClustersView: React.FC = () => {
     };
   }, [contextClusters]);
 
-  const handleViewOnMap = (clusterId: string) => {
-    console.log('View cluster on map:', clusterId);
-    // TODO: Navigate to map view and center on cluster
+  const handleViewOnMap = (cluster: SensorCluster) => {
+    if (!onFocusOnMap) return;
+    onFocusOnMap({
+      lat: cluster.centerLat,
+      lng: cluster.centerLng,
+      zoom: 14,
+      clusterId: cluster.clusterId,
+    });
   };
 
   const getStatusColor = (avgPm25?: number, avgCo2?: number) => {
@@ -144,9 +154,9 @@ const ClustersView: React.FC = () => {
                 </div>
               </div>
 
-              <button 
+              <button
                 className="cluster-action-btn"
-                onClick={() => handleViewOnMap(cluster.clusterId)}
+                onClick={() => handleViewOnMap(cluster)}
               >
                 <MapPin className="w-4 h-4" />
                 <span>Xem Trên Bản Đồ</span>

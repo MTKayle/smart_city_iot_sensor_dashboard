@@ -423,6 +423,8 @@ export interface TelemetryQueryParams {
   startTime?: string;
   endTime?: string;
   limit?: number;
+  /** Aggregation bucket size in minutes. Required for long ranges so the response stays under the row limit. */
+  bucketMinutes?: number;
 }
 
 /**
@@ -437,6 +439,7 @@ export const fetchTelemetry = async (
     if (params?.startTime) queryParams.start_time = params.startTime;
     if (params?.endTime) queryParams.end_time = params.endTime;
     if (params?.limit) queryParams.limit = params.limit;
+    if (params?.bucketMinutes) queryParams.bucket_minutes = params.bucketMinutes;
 
     const response = await apiClient.get<Telemetry[]>(
       `/api/telemetry/${sensorId}`,
@@ -447,6 +450,66 @@ export const fetchTelemetry = async (
     if (error instanceof ApiError) throw error;
     throw new ApiError(
       `Failed to fetch telemetry for sensor ${sensorId}`,
+      undefined,
+      error,
+    );
+  }
+};
+
+/**
+ * One row of the Oracle TELEMETRY_SUMMARY table — pre-aggregated metrics
+ * for a (location, granularity, time-bucket) tuple.
+ */
+export interface LocationHistoryPoint {
+  timeBucket: string;
+  avgPM25: number | null;
+  maxPM25: number | null;
+  avgCO2: number | null;
+  maxCO2: number | null;
+  minCO2: number | null;
+  avgNoise: number | null;
+  maxNoise: number | null;
+  minNoise: number | null;
+  avgTemperature: number | null;
+  maxTemperature: number | null;
+  minTemperature: number | null;
+  avgHumidity: number | null;
+  aqi: number | null;
+  cleanScore: number | null;
+  dataPoints: number;
+}
+
+export type HistoryGranularity = 'HOURLY' | 'DAILY' | 'WEEKLY';
+
+/**
+ * Fetch Oracle TELEMETRY_SUMMARY rows for a location at the given granularity.
+ *
+ * Used by the Analytics & Compare views — these are *real* aggregated values
+ * from Oracle, not synthetic mock data.
+ */
+export const fetchLocationHistory = async (
+  locationId: string,
+  params: {
+    granularity: HistoryGranularity;
+    startTime?: string;
+    endTime?: string;
+  },
+): Promise<LocationHistoryPoint[]> => {
+  try {
+    const queryParams: Record<string, string> = {
+      granularity: params.granularity,
+    };
+    if (params.startTime) queryParams.start_time = params.startTime;
+    if (params.endTime) queryParams.end_time = params.endTime;
+    const response = await apiClient.get<LocationHistoryPoint[]>(
+      `/api/locations/${locationId}/history`,
+      { params: queryParams },
+    );
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      `Failed to fetch history for location ${locationId}`,
       undefined,
       error,
     );

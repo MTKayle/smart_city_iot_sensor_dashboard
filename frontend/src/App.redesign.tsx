@@ -12,24 +12,35 @@ import LeaderboardView from './components/redesign/LeaderboardView.tsx';
 import SettingsView from './components/redesign/SettingsView.tsx';
 import './styles/redesign.css';
 
-import type { ViewType } from './components/redesign/types';
+import type { ViewType, MapFocusTarget } from './components/redesign/types';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewType>('map');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mapFocusTarget, setMapFocusTarget] = useState<MapFocusTarget | null>(null);
+
+  const focusMapOn = (target: MapFocusTarget) => {
+    setMapFocusTarget(target);
+    setCurrentView('map');
+  };
 
   const renderView = () => {
     switch (currentView) {
       case 'dashboard':
-        return <Dashboard onNavigate={setCurrentView} />;
+        return <Dashboard onNavigate={setCurrentView} onFocusOnMap={focusMapOn} />;
       case 'map':
-        return <MapView />;
+        return (
+          <MapView
+            focusTarget={mapFocusTarget}
+            onFocusConsumed={() => setMapFocusTarget(null)}
+          />
+        );
       case 'sensors':
-        return <SensorsView />;
+        return <SensorsView onFocusOnMap={focusMapOn} />;
       case 'clusters':
-        return <ClustersView />;
+        return <ClustersView onFocusOnMap={focusMapOn} />;
       case 'alerts':
-        return <AlertsView />;
+        return <AlertsView onFocusOnMap={focusMapOn} />;
       case 'analytics':
         return <AnalyticsView />;
       case 'leaderboard':
@@ -37,7 +48,12 @@ const App: React.FC = () => {
       case 'settings':
         return <SettingsView />;
       default:
-        return <MapView />;
+        return (
+          <MapView
+            focusTarget={mapFocusTarget}
+            onFocusConsumed={() => setMapFocusTarget(null)}
+          />
+        );
     }
   };
 

@@ -44,6 +44,19 @@ export interface Alert {
 
 export type HeatmapMetric = 'pm25' | 'temp' | 'humidity' | 'co2' | 'noise';
 
+/**
+ * One-shot navigation request to focus the map on a coordinate.
+ * The MapView consumes it on render, animates flyTo, then asks the
+ * parent to clear it via `onFlyComplete`.
+ */
+export interface MapFocusTarget {
+  lat: number;
+  lng: number;
+  zoom: number;
+  /** Optional hint for the cluster panel that should auto-open after focusing. */
+  clusterId?: string;
+}
+
 export interface MapLayers {
   sensors: boolean;
   clusters: boolean;

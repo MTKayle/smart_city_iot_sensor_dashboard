@@ -10,7 +10,8 @@ import { Battery, Wifi, Clock } from 'lucide-react'
 import MapLayerControl from './MapLayerControl'
 import HeatmapControl from './HeatmapControl'
 import SensorDetailPanel from './SensorDetailPanel'
-import type { HeatmapMetric, MapLayers } from './types'
+import type { HeatmapMetric, MapLayers, MapFocusTarget } from './types'
+import { METRIC_SPECS, metersToPixels, rampColor } from '../../utils/heatmap'
 
 interface SensorWithTelemetry {
   id: string
@@ -225,135 +226,171 @@ function ClusterPopup({ cluster, onZoomToCluster }: { cluster: ClusterData; onZo
   )
 }
 
-function HeatmapLayer({ 
-  sensors, 
-  heatmapMetric 
-}: { 
+/**
+ * Blob-based heatmap layer.
+ *
+ * Approach (mirrors what leaflet.heat does, but with breakpoint-aware colors):
+ *   1. For every sensor draw a radial gradient blob — strong color at the
+ *      centre, fading to transparent at the influence radius.
+ *   2. Composite operation `lighter` adds RGB across overlapping blobs, so
+ *      hot zones intensify visually (red over yellow → vivid orange-red).
+ *   3. Adaptive radius is in metres → pixels, so the spatial footprint stays
+ *      meaningful at every zoom level.
+ *
+ * Anchoring strategy:
+ *   The canvas lives directly on the map's container element (NOT inside an
+ *   overlayPane). overlayPane gets translated during pan/zoom-anim, which would
+ *   cause the heatmap to drift away from the markers. By staying fixed to the
+ *   viewport and redrawing on every `move`/`zoom` event, container-point
+ *   coordinates remain valid frame-by-frame.
+ */
+function HeatmapLayer({
+  sensors,
+  heatmapMetric,
+  opacity,
+}: {
   sensors: SensorWithTelemetry[]
-  heatmapMetric: HeatmapMetric 
+  heatmapMetric: HeatmapMetric
+  opacity: number
 }) {
   const map = useMap()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const rafRef = useRef<number | null>(null)
-  
+
   useEffect(() => {
-    // Skip if no sensors
     if (sensors.length === 0) return
-    
+
     const canvas = L.DomUtil.create('canvas', 'leaflet-heatmap-layer')
     canvasRef.current = canvas
-    
-    const pane = map.getPane('overlayPane')
-    if (pane) {
-      pane.appendChild(canvas)
+
+    // Pin the canvas to the visible viewport — never inside a translating pane.
+    canvas.style.position = 'absolute'
+    canvas.style.top = '0'
+    canvas.style.left = '0'
+    canvas.style.pointerEvents = 'none'
+    canvas.style.zIndex = '400' // above tile layer (200), below markers (600)
+    canvas.style.filter = 'blur(4px)'
+    canvas.style.opacity = String(opacity)
+
+    const container = map.getContainer()
+    container.appendChild(canvas)
+
+    const spec = METRIC_SPECS[heatmapMetric]
+
+    const pickValue = (s: SensorWithTelemetry): number | null => {
+      switch (heatmapMetric) {
+        case 'pm25':     return s.pm25
+        case 'temp':     return s.temp
+        case 'humidity': return s.humidity
+        case 'co2':      return s.co2
+        case 'noise':    return s.noise
+        default:         return null
+      }
     }
-    
+
+    const rgbOf = (rgba: string): [number, number, number] => {
+      const m = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+      if (!m) return [255, 255, 255]
+      return [Number(m[1]), Number(m[2]), Number(m[3])]
+    }
+
     const drawHeatmap = () => {
-      // Cancel any pending animation frame
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current)
+      const size = map.getSize()
+      // Resize only when needed — assigning width/height clears the canvas.
+      if (canvas.width !== size.x) canvas.width = size.x
+      if (canvas.height !== size.y) canvas.height = size.y
+
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+      const center = map.getCenter()
+      const spatialPx = metersToPixels(spec.radiusMeters, center.lat, map.getZoom())
+      const radiusPx = Math.max(90, Math.min(280, spatialPx))
+
+      // Additive blending: overlapping sensor blobs intensify into hot spots.
+      ctx.globalCompositeOperation = 'lighter'
+
+      for (const s of sensors) {
+        const v = pickValue(s)
+        if (v === null || v === undefined || isNaN(v) || v === 0) continue
+
+        // Container point: pixel position relative to the map's viewport,
+        // matches exactly where Leaflet draws the marker for this sensor.
+        const point = map.latLngToContainerPoint([s.lat, s.lng])
+        const x = point.x
+        const y = point.y
+
+        // Skip sensors whose influence circle is entirely off-screen.
+        if (
+          x < -radiusPx ||
+          x > canvas.width + radiusPx ||
+          y < -radiusPx ||
+          y > canvas.height + radiusPx
+        ) continue
+
+        const [r, g, b] = rgbOf(rampColor(v, spec, 1))
+
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, radiusPx)
+        grad.addColorStop(0,    `rgba(${r},${g},${b},0.85)`)
+        grad.addColorStop(0.35, `rgba(${r},${g},${b},0.55)`)
+        grad.addColorStop(0.7,  `rgba(${r},${g},${b},0.22)`)
+        grad.addColorStop(1,    `rgba(${r},${g},${b},0)`)
+
+        ctx.fillStyle = grad
+        ctx.fillRect(x - radiusPx, y - radiusPx, radiusPx * 2, radiusPx * 2)
       }
-      
-      rafRef.current = requestAnimationFrame(() => {
-        const size = map.getSize()
-        canvas.width = size.x
-        canvas.height = size.y
-        
-        const ctx = canvas.getContext('2d')
-        if (!ctx) return
-        
-        ctx.clearRect(0, 0, canvas.width, canvas.height)
-        
-        const bounds = map.getBounds()
-        const topLeft = map.latLngToContainerPoint(bounds.getNorthWest())
-        
-        canvas.style.transform = `translate(${topLeft.x}px, ${topLeft.y}px)`
-        canvas.style.position = 'absolute'
-        canvas.style.pointerEvents = 'none'
-        
-        sensors.forEach(sensor => {
-          const point = map.latLngToContainerPoint([sensor.lat, sensor.lng])
-          const x = point.x - topLeft.x
-          const y = point.y - topLeft.y
-          
-          let value: number
-          let maxValue: number
-          
-          switch (heatmapMetric) {
-            case 'pm25':
-              value = sensor.pm25
-              maxValue = 150
-              break
-            case 'temp':
-              value = sensor.temp
-              maxValue = 50
-              break
-            case 'humidity':
-              value = sensor.humidity
-              maxValue = 100
-              break
-            case 'co2':
-              value = sensor.co2
-              maxValue = 2000
-              break
-            case 'noise':
-              value = sensor.noise
-              maxValue = 100
-              break
-            default:
-              value = sensor.pm25
-              maxValue = 150
-          }
-          
-          const intensity = Math.min(value / maxValue, 1)
-          const radius = 80
-          
-          const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius)
-          
-          if (intensity > 0.7) {
-            gradient.addColorStop(0, `rgba(239, 68, 68, ${intensity * 0.6})`)
-            gradient.addColorStop(1, 'rgba(239, 68, 68, 0)')
-          } else if (intensity > 0.4) {
-            gradient.addColorStop(0, `rgba(245, 158, 11, ${intensity * 0.6})`)
-            gradient.addColorStop(1, 'rgba(245, 158, 11, 0)')
-          } else {
-            gradient.addColorStop(0, `rgba(16, 185, 129, ${intensity * 0.6})`)
-            gradient.addColorStop(1, 'rgba(16, 185, 129, 0)')
-          }
-          
-          ctx.fillStyle = gradient
-          ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2)
-        })
-      })
+
+      ctx.globalCompositeOperation = 'source-over'
     }
-    
+
+    // Initial render.
     drawHeatmap()
-    map.on('moveend', drawHeatmap)
+
+    // Listen to high-frequency events (move/zoom) for smooth tracking during
+    // pan and pinch-zoom gestures, plus the *end variants for animated zooms.
+    map.on('move', drawHeatmap)
+    map.on('zoom', drawHeatmap)
     map.on('zoomend', drawHeatmap)
-    
+    map.on('moveend', drawHeatmap)
+    map.on('resize', drawHeatmap)
+    map.on('viewreset', drawHeatmap)
+
     return () => {
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current)
-      }
-      map.off('moveend', drawHeatmap)
+      map.off('move', drawHeatmap)
+      map.off('zoom', drawHeatmap)
       map.off('zoomend', drawHeatmap)
-      if (canvas.parentNode) {
-        canvas.parentNode.removeChild(canvas)
-      }
+      map.off('moveend', drawHeatmap)
+      map.off('resize', drawHeatmap)
+      map.off('viewreset', drawHeatmap)
+      if (canvas.parentNode) canvas.parentNode.removeChild(canvas)
     }
-  }, [map, sensors, heatmapMetric])
-  
+  }, [map, sensors, heatmapMetric, opacity])
+
   return null
 }
 
-const MapView: React.FC = () => {
-  const { sensors, telemetryMap, alerts } = useAppContext()
+interface MapViewProps {
+  focusTarget?: MapFocusTarget | null
+  onFocusConsumed?: () => void
+}
+
+const MapView: React.FC<MapViewProps> = ({ focusTarget, onFocusConsumed }) => {
+  const { sensors, telemetryMap, alerts, clusters: contextClusters } = useAppContext()
   const [mounted, setMounted] = useState(false)
   const [zoomLevel, setZoomLevel] = useState(12)
   // Selection state holds IDs only — the panel reads live data from AppContext
   // so realtime updates flow through automatically.
   const [selectedSensorId, setSelectedSensorId] = useState<string | null>(null)
   const [selectedCluster, setSelectedCluster] = useState<ClusterData | null>(null)
+  const [externalFlyTarget, setExternalFlyTarget] = useState<{
+    lat: number
+    lng: number
+    zoom: number
+  } | null>(null)
+  // Oracle cluster the user just opened from the Clusters page — drives the
+  // glowing ring on the map so the focused area is unmistakable.
+  const [focusedOracleClusterId, setFocusedOracleClusterId] = useState<string | null>(null)
   const [layers, setLayers] = useState<MapLayers>({
     sensors: true,
     clusters: true,
@@ -361,18 +398,50 @@ const MapView: React.FC = () => {
     heatmap: false,
   })
   const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>('pm25')
+  const [heatmapOpacity, setHeatmapOpacity] = useState(0.85)
   const mapRef = useRef<L.Map | null>(null)
-  
+
   useEffect(() => {
     setMounted(true)
   }, [])
-  
+
   // Clear selected cluster when zoom changes to sensor view
   useEffect(() => {
     if (zoomLevel >= 13 && selectedCluster) {
       setSelectedCluster(null)
     }
   }, [zoomLevel, selectedCluster])
+
+  // External focus request from another view (e.g. ClustersView "Xem trên bản đồ").
+  // Fly to the requested coordinates and surface a short-lived cluster halo
+  // so the user sees which area was just opened.
+  useEffect(() => {
+    if (!focusTarget) return
+    setExternalFlyTarget({
+      lat: focusTarget.lat,
+      lng: focusTarget.lng,
+      zoom: focusTarget.zoom,
+    })
+    if (focusTarget.clusterId) {
+      setFocusedOracleClusterId(focusTarget.clusterId)
+    }
+    onFocusConsumed?.()
+    // Release fly priority once the animation has settled so future clicks
+    // (sensor, grid-cluster) regain control of the camera. The halo lives
+    // longer (8s) so the user can clearly see which area was opened.
+    const flyTimer = setTimeout(() => setExternalFlyTarget(null), 1000)
+    const haloTimer = setTimeout(() => setFocusedOracleClusterId(null), 8000)
+    return () => {
+      clearTimeout(flyTimer)
+      clearTimeout(haloTimer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusTarget])
+
+  const focusedOracleCluster = useMemo(() => {
+    if (!focusedOracleClusterId) return null
+    return contextClusters.find((c) => c.clusterId === focusedOracleClusterId) ?? null
+  }, [focusedOracleClusterId, contextClusters])
   
   // Memoize sensors with telemetry data - only process when data changes
   const sensorsWithData: SensorWithTelemetry[] = useMemo(() => {
@@ -489,6 +558,7 @@ const MapView: React.FC = () => {
           <ZoomHandler onZoomChange={setZoomLevel} />
           <MapController
             flyTarget={(() => {
+              if (externalFlyTarget) return externalFlyTarget
               if (selectedSensorId) {
                 const s = sensorsWithData.find(x => x.id === selectedSensorId)
                 if (s) return { lat: s.lat, lng: s.lng, zoom: 15 }
@@ -499,7 +569,13 @@ const MapView: React.FC = () => {
               return null
             })()}
           />
-          {layers.heatmap && <HeatmapLayer sensors={sensorsWithData} heatmapMetric={heatmapMetric} />}
+          {layers.heatmap && (
+            <HeatmapLayer
+              sensors={sensorsWithData}
+              heatmapMetric={heatmapMetric}
+              opacity={heatmapOpacity}
+            />
+          )}
           
           {/* Clusters */}
           {showClusters && clusters.map(cluster => (
@@ -553,6 +629,24 @@ const MapView: React.FC = () => {
                 }}
               />
             ))}
+
+          {/* Focused Oracle cluster halo — appears for ~8s after navigating
+              from the Clusters page so the area is unmistakable. */}
+          {focusedOracleCluster && (
+            <CircleMarker
+              key={`focus-${focusedOracleCluster.clusterId}`}
+              center={[focusedOracleCluster.centerLat, focusedOracleCluster.centerLng]}
+              radius={50}
+              pathOptions={{
+                color: '#3B82F6',
+                fillColor: '#3B82F6',
+                fillOpacity: 0.15,
+                weight: 3,
+                dashArray: '6 4',
+                className: 'cluster-focus-halo',
+              }}
+            />
+          )}
         </MapContainer>
 
         {/* Map Controls */}
@@ -565,6 +659,9 @@ const MapView: React.FC = () => {
           <HeatmapControl
             selectedMetric={heatmapMetric}
             onMetricChange={setHeatmapMetric}
+            sensors={sensorsWithData}
+            opacity={heatmapOpacity}
+            onOpacityChange={setHeatmapOpacity}
           />
         )}
       </div>
