@@ -86,29 +86,35 @@ class TestSensorSimulator:
         assert isinstance(telemetry["timestamp"], str)
     
     def test_generate_telemetry_value_ranges(self):
-        """Test that generated telemetry values are within expected ranges."""
+        """
+        Generated telemetry must stay inside the simulator's physical clamps.
+
+        The simulator can drive metrics into the CRITICAL alert band during a
+        typed anomaly event (TRAFFIC_JAM, INDUSTRIAL_FIRE, EQUIPMENT_MALFUNCTION,
+        STORM_INCOMING, HEAT_WAVE, CO2_TREND), so the assertions match the
+        widened clamps in `step_state` rather than a "normal-day" range.
+        """
         simulator = SensorSimulator(
             broker_host="localhost",
             broker_port=1883,
             sensor_ids=["sensor_001"]
         )
-        
-        # Generate multiple samples to test ranges
+
         for _ in range(100):
             telemetry = simulator.generate_telemetry("sensor_001")
             data = telemetry["data"]
             quality = telemetry["quality"]
-            
-            # Verify data ranges
-            assert 300 <= data["co2"] <= 2000, f"CO2 {data['co2']} out of range"
-            assert 30 <= data["noise"] <= 100, f"Noise {data['noise']} out of range"
-            assert 15 <= data["temperature"] <= 35, f"Temperature {data['temperature']} out of range"
-            assert 20 <= data["pm25"] <= 60, f"PM2.5 {data['pm25']} out of range"
-            assert 60 <= data["humidity"] <= 85, f"Humidity {data['humidity']} out of range"
-            
-            # Verify quality ranges
-            assert 70 <= quality["batteryLevel"] <= 100, f"Battery {quality['batteryLevel']} out of range"
-            assert -60 <= quality["signalStrength"] <= -30, f"Signal {quality['signalStrength']} out of range"
+
+            # Physical clamps from simulator.step_state
+            assert 250 <= data["co2"] <= 3000, f"CO2 {data['co2']} out of range"
+            assert 30 <= data["noise"] <= 125, f"Noise {data['noise']} out of range"
+            assert 15 <= data["temperature"] <= 42, f"Temperature {data['temperature']} out of range"
+            assert 5 <= data["pm25"] <= 300, f"PM2.5 {data['pm25']} out of range"
+            assert 20 <= data["humidity"] <= 99, f"Humidity {data['humidity']} out of range"
+
+            # Quality clamps
+            assert 0 <= quality["batteryLevel"] <= 100, f"Battery {quality['batteryLevel']} out of range"
+            assert -90 <= quality["signalStrength"] <= -30, f"Signal {quality['signalStrength']} out of range"
     
     def test_generate_telemetry_sensor_id(self):
         """Test that generated telemetry contains correct sensor ID."""

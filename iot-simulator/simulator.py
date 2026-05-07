@@ -3,6 +3,8 @@
 IoT Sensor Simulator — Smart City Dashboard.
 
 Generates realistic environmental telemetry and publishes to MQTT.
+Emits a steady stream of varied alert-eligible events so the backend's
+threshold / predictive / anomaly detection can be exercised end-to-end.
 
 Realism principles:
 
@@ -15,29 +17,38 @@ Realism principles:
    With α = 0.85, every 5-second tick drifts ~15 % toward the target —
    producing realistic slow change between adjacent readings.
 
-3. Spatial profile per ward:
-       - District 1 (downtown markets) is the most polluted / loudest
-       - District 5 (Cholon residential) is the cleanest
-   Profiles match `backend/app/db/seed_telemetry.py` so historical seed
-   data and live data agree.
+3. Spatial profile per ward — see WARD_PROFILES. Profiles match
+   `backend/app/db/seed_telemetry.py` so historical seed data agrees
+   with the live stream.
 
-4. Diurnal patterns:
-       - Rush-hour spikes for CO2 / Noise / PM2.5 at 08:00 and 18:00
-       - Night-time dip 02:00-04:00
-       - Temperature follows a sine wave peaking ~14:00
-       - Humidity inverse to temperature (warm air → drier)
+4. Diurnal patterns: rush-hour spikes (08:00 / 18:00), night dip
+   (02:00–04:00), temperature sine wave peaking ~14:00, humidity
+   inverse to temperature.
 
-5. Weekend effect: Sat/Sun traffic impact reduced 40 % vs weekdays.
+5. Weekend effect: Sat/Sun traffic impact reduced 40 %.
 
-6. Rare anomalies (~1 in 10 000 ticks per sensor):
-       - Pollution spike 1.5–2.5× lasting 2–6 ticks (mô phỏng cháy, kẹt xe)
-       - Then smoothly returns to baseline via the EWMA.
+6. **Hotspot sensors** — a small fixed subset (busy markets, airport,
+   port) carries higher baselines and higher anomaly probability so the
+   alert dashboard always has interesting state. Demo-friendly.
 
-7. Inter-metric correlation:
-       - Traffic factor multiplies CO2 + PM2.5 + Noise together
-       - Sun curve drives Temperature & inversely Humidity
+7. **Configurable danger level** via `SIMULATOR_DANGER_LEVEL`:
+       normal   — original behavior (research / quiet runs)
+       elevated — DEFAULT: more frequent anomalies, ~30 alerts/hour
+       extreme  — stress-test: ~150 alerts/hour, hits CRITICAL often
 
-8. Boundary clamping: every metric stays inside physically-plausible range.
+8. **Typed anomaly events** (instead of one generic spike):
+       TRAFFIC_JAM          CO2 + PM2.5 + Noise rise together
+       INDUSTRIAL_FIRE      PM2.5 dominates (→ HIGH / CRITICAL PM2.5)
+       EQUIPMENT_MALFUNCTION Noise dominates (→ HIGH Noise)
+       STORM_INCOMING       Humidity rise + Temp drop (→ Humidity alert)
+       HEAT_WAVE            Temperature surge + Humidity drop
+       CO2_TREND            Slow linear CO2 ramp (→ Predictive alert)
+   Each event has a distinct duration, multiplier profile, and target
+   severity tier so the lecturer can correlate "I see a CRITICAL PM2.5
+   alert" with "INDUSTRIAL_FIRE on sensor X" in the simulator log.
+
+9. Boundary clamping: every metric stays inside physically-plausible
+   range (CO2 250–3000 ppm, Noise 30–125 dB, PM2.5 5–300 µg/m³, …).
 """
 
 import os
@@ -49,7 +60,7 @@ import random
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
@@ -120,9 +131,130 @@ DEFAULT_PROFILE = WARD_PROFILES['ward_q3_01']
 # Smoothing factor — higher value ⇒ slower drift between ticks.
 EWMA_ALPHA = 0.85
 
-# Anomaly rate (per sensor per tick). 33 sensors × 720 ticks/hour
-# ≈ ~2.4 anomalies/hour at this rate — rare enough to be plausible.
-ANOMALY_PROBABILITY = 1 / 10000
+# A small set of fixed "hotspot" sensors that always have higher baselines
+# and a much higher anomaly probability. Keeps the alerts dashboard alive
+# during demos. Chosen one per high-traffic ward (market / airport / port).
+HOTSPOT_SENSORS = frozenset({
+    'sen_q1_ben_thanh_01',   # Bến Thành market — peak crowd
+    'sen_tb_01_01',          # Tân Bình — airport adjacent
+    'sen_bt_25_01',          # Bình Thạnh — busy mixed-use
+    'sen_q4_khanh_hoi_01',   # Q4 — port-adjacent
+    'sen_q1_ben_nghe_01',    # Q1 downtown
+})
+
+# ============================================================================
+# Danger level — tunes anomaly frequency + baseline shift via env var
+# ============================================================================
+#
+# `SIMULATOR_DANGER_LEVEL` ∈ {normal, elevated, extreme}
+#
+#   normal   — research / quiet runs. Anomalies are rare (~2/hour).
+#   elevated — DEFAULT for demos. ~30 alerts/hour spread across all sensors,
+#              hotspots account for ~40% of them.
+#   extreme  — stress test. ~150 alerts/hour, multiple CRITICAL events.
+
+DANGER_LEVEL = os.getenv("SIMULATOR_DANGER_LEVEL", "elevated").lower()
+if DANGER_LEVEL not in {"normal", "elevated", "extreme"}:
+    logger.warning(f"Unknown SIMULATOR_DANGER_LEVEL={DANGER_LEVEL!r}, defaulting to 'elevated'")
+    DANGER_LEVEL = "elevated"
+
+# Per-tick anomaly probability for a normal sensor.
+# Hotspot sensors multiply this by HOTSPOT_BOOST.
+DANGER_CONFIG: Dict[str, Dict[str, float]] = {
+    'normal':   {'normal_prob': 1 / 10000, 'hotspot_boost': 3.0,  'baseline_shift': 1.00},
+    'elevated': {'normal_prob': 1 / 1500,  'hotspot_boost': 5.0,  'baseline_shift': 1.08},
+    'extreme':  {'normal_prob': 1 / 400,   'hotspot_boost': 5.0,  'baseline_shift': 1.18},
+}
+_cfg = DANGER_CONFIG[DANGER_LEVEL]
+ANOMALY_PROBABILITY = _cfg['normal_prob']
+HOTSPOT_ANOMALY_BOOST = _cfg['hotspot_boost']
+BASELINE_SHIFT = _cfg['baseline_shift']
+
+logger.info(
+    f"Danger level={DANGER_LEVEL} · anomaly_prob=1/{int(1 / ANOMALY_PROBABILITY)} "
+    f"(hotspots ×{HOTSPOT_ANOMALY_BOOST:.1f}) · baseline_shift=×{BASELINE_SHIFT:.2f}"
+)
+
+
+# ============================================================================
+# Anomaly event catalog
+# ============================================================================
+#
+# Each event type carries multipliers / offsets applied on top of the
+# normal target. Multiple events on the same sensor never overlap — a new
+# event only starts when the previous one has fully decayed.
+#
+#   target_severity is informational only — it tells you what alert tier
+#   the event is *designed* to trigger, so you can correlate the simulator
+#   log with the alerts dashboard during a demo.
+
+@dataclass(frozen=True)
+class AnomalyEventSpec:
+    name: str
+    weight: float            # selection weight when picking a new event
+    duration_range: Tuple[int, int]
+    target_severity: str     # 'MEDIUM' | 'HIGH' | 'CRITICAL'
+    # Per-metric ranges. (low, high) — sampled uniformly when event starts.
+    co2_mult: Tuple[float, float] = (1.0, 1.0)
+    noise_mult: Tuple[float, float] = (1.0, 1.0)
+    pm25_mult: Tuple[float, float] = (1.0, 1.0)
+    temp_offset: Tuple[float, float] = (0.0, 0.0)
+    hum_offset: Tuple[float, float] = (0.0, 0.0)
+    # Slow linear ramps (added per tick) — used to trigger predictive alerts.
+    co2_slope: Tuple[float, float] = (0.0, 0.0)
+    description: str = ""
+
+
+ANOMALY_EVENTS: List[AnomalyEventSpec] = [
+    AnomalyEventSpec(
+        name="TRAFFIC_JAM", weight=0.45,
+        duration_range=(4, 9), target_severity="HIGH",
+        co2_mult=(1.7, 2.4), noise_mult=(1.2, 1.5), pm25_mult=(1.6, 2.2),
+        description="Kẹt xe: CO2 + PM2.5 + Noise tăng đồng thời",
+    ),
+    AnomalyEventSpec(
+        name="INDUSTRIAL_FIRE", weight=0.20,
+        duration_range=(8, 18), target_severity="CRITICAL",
+        pm25_mult=(2.8, 4.5), noise_mult=(1.1, 1.4), co2_mult=(1.3, 1.7),
+        description="Cháy / khói công nghiệp: PM2.5 vọt rất cao",
+    ),
+    AnomalyEventSpec(
+        name="EQUIPMENT_MALFUNCTION", weight=0.15,
+        duration_range=(5, 12), target_severity="HIGH",
+        noise_mult=(1.6, 2.2),
+        description="Máy khoan / máy nén lỗi: tiếng ồn vượt ngưỡng OSHA",
+    ),
+    AnomalyEventSpec(
+        name="STORM_INCOMING", weight=0.10,
+        duration_range=(15, 25), target_severity="MEDIUM",
+        hum_offset=(8.0, 18.0), temp_offset=(-3.5, -1.5),
+        description="Áp thấp / mưa lớn: độ ẩm tăng vọt, nhiệt độ giảm",
+    ),
+    AnomalyEventSpec(
+        name="HEAT_WAVE", weight=0.05,
+        duration_range=(20, 35), target_severity="MEDIUM",
+        temp_offset=(4.0, 7.5), hum_offset=(-15.0, -8.0),
+        description="Sóng nhiệt: nhiệt độ tăng kéo dài, độ ẩm giảm",
+    ),
+    AnomalyEventSpec(
+        name="CO2_TREND", weight=0.05,
+        duration_range=(22, 30), target_severity="HIGH (Predictive)",
+        co2_slope=(20.0, 35.0),
+        description="Rò rỉ chậm: CO2 tăng tuyến tính → kích hoạt Predictive alert",
+    ),
+]
+_TOTAL_WEIGHT = sum(e.weight for e in ANOMALY_EVENTS)
+
+
+def _pick_event() -> AnomalyEventSpec:
+    """Weighted random pick from ANOMALY_EVENTS."""
+    r = random.random() * _TOTAL_WEIGHT
+    cum = 0.0
+    for ev in ANOMALY_EVENTS:
+        cum += ev.weight
+        if r <= cum:
+            return ev
+    return ANOMALY_EVENTS[-1]
 
 
 # ============================================================================
@@ -130,10 +262,24 @@ ANOMALY_PROBABILITY = 1 / 10000
 # ============================================================================
 
 @dataclass
+class ActiveAnomaly:
+    """A single in-flight anomaly event — sampled multipliers + countdown."""
+    spec: AnomalyEventSpec
+    ticks_left: int
+    co2_mult: float
+    noise_mult: float
+    pm25_mult: float
+    temp_offset: float
+    hum_offset: float
+    co2_slope: float
+
+
+@dataclass
 class SensorState:
     sensor_id: str
     location_id: str
     profile: Dict[str, float]
+    is_hotspot: bool = False
 
     # Current metric values.
     co2: float = 0.0
@@ -147,25 +293,30 @@ class SensorState:
     signal_dbm: float = field(default_factory=lambda: random.uniform(-55, -45))
 
     # Anomaly state.
-    anomaly_ticks_left: int = 0
-    anomaly_factor: float = 1.0
+    active_anomaly: Optional[ActiveAnomaly] = None
 
     def __post_init__(self):
-        # Initialise current values to the profile baseline so the first
-        # publish already looks plausible (not zero or extreme).
+        # Initialise current values to the (possibly shifted) profile baseline
+        # so the first publish already looks plausible (not zero or extreme).
         p = self.profile
-        self.co2 = p['co2']
-        self.noise = p['noise']
-        self.temperature = p['temp']
-        self.pm25 = p['pm25']
+        # Hotspots get an extra +5% on top of the global baseline shift.
+        hot_shift = 1.05 if self.is_hotspot else 1.0
+        self.co2 = p['co2'] * BASELINE_SHIFT * hot_shift
+        self.noise = p['noise'] * BASELINE_SHIFT * hot_shift
+        self.temperature = p['temp']  # don't shift physical climate
+        self.pm25 = p['pm25'] * BASELINE_SHIFT * hot_shift
         self.humidity = p['hum']
+
+    def trigger_probability(self) -> float:
+        """Per-tick anomaly trigger probability for this sensor."""
+        return ANOMALY_PROBABILITY * (HOTSPOT_ANOMALY_BOOST if self.is_hotspot else 1.0)
 
 
 # ============================================================================
 # Realism math
 # ============================================================================
 
-def compute_targets(profile: Dict[str, float], ts: datetime) -> Dict[str, float]:
+def compute_targets(profile: Dict[str, float], ts: datetime, is_hotspot: bool) -> Dict[str, float]:
     """
     Produce the "target" value for each metric at this timestamp.
     The live state will EWMA-drift toward these targets.
@@ -186,39 +337,90 @@ def compute_targets(profile: Dict[str, float], ts: datetime) -> Dict[str, float]
     # Sine wave: peak at 14:00, trough at 02:00.
     sun = math.sin(math.pi * (hour - 6.0) / 12.0)
 
+    # Hotspots get a +5% baseline bump on top of the global shift.
+    hot_shift = 1.05 if is_hotspot else 1.0
+    base_co2   = profile['co2']   * BASELINE_SHIFT * hot_shift
+    base_noise = profile['noise'] * BASELINE_SHIFT * hot_shift
+    base_pm25  = profile['pm25']  * BASELINE_SHIFT * hot_shift
+
     return {
-        'co2':   profile['co2']   + rush * 350 * weekend_mult * traffic - night * 80,
-        'noise': profile['noise'] + rush * 22  * weekend_mult * traffic - night * 18,
-        'pm25':  profile['pm25']  + rush * 45  * weekend_mult * traffic - night * 10,
+        'co2':   base_co2   + rush * 380 * weekend_mult * traffic - night * 80,
+        'noise': base_noise + rush * 24  * weekend_mult * traffic - night * 18,
+        'pm25':  base_pm25  + rush * 50  * weekend_mult * traffic - night * 10,
         'temp':  profile['temp']  + 4 * sun,
         'hum':   profile['hum']   - 12 * sun,
     }
 
 
+def maybe_start_anomaly(state: SensorState) -> None:
+    """If no event is active and the dice roll, start a new typed event."""
+    if state.active_anomaly is not None:
+        return
+    if random.random() >= state.trigger_probability():
+        return
+
+    spec = _pick_event()
+    duration = random.randint(*spec.duration_range)
+
+    def _u(rng: Tuple[float, float]) -> float:
+        return random.uniform(*rng)
+
+    state.active_anomaly = ActiveAnomaly(
+        spec=spec,
+        ticks_left=duration,
+        co2_mult=_u(spec.co2_mult),
+        noise_mult=_u(spec.noise_mult),
+        pm25_mult=_u(spec.pm25_mult),
+        temp_offset=_u(spec.temp_offset),
+        hum_offset=_u(spec.hum_offset),
+        co2_slope=_u(spec.co2_slope),
+    )
+
+    tag = "🔥" if "FIRE" in spec.name else "⚡"
+    hot_marker = " [HOTSPOT]" if state.is_hotspot else ""
+    logger.info(
+        f"{tag} {spec.name}{hot_marker} on {state.sensor_id} "
+        f"({state.location_id}) for {duration} ticks "
+        f"→ expect {spec.target_severity} alert · {spec.description}"
+    )
+
+
+def apply_anomaly(targets: Dict[str, float], anomaly: ActiveAnomaly,
+                  current_co2: float) -> Dict[str, float]:
+    """Apply the active anomaly's multipliers/offsets to `targets`."""
+    targets['co2']   = targets['co2']   * anomaly.co2_mult
+    targets['noise'] = targets['noise'] * anomaly.noise_mult
+    targets['pm25']  = targets['pm25']  * anomaly.pm25_mult
+    targets['temp']  = targets['temp']  + anomaly.temp_offset
+    targets['hum']   = targets['hum']   + anomaly.hum_offset
+    # Slow linear ramp on top of the current state — for predictive alerts.
+    if anomaly.co2_slope > 0:
+        targets['co2'] = max(targets['co2'], current_co2 + anomaly.co2_slope)
+    return targets
+
+
 def step_state(state: SensorState, ts: datetime) -> None:
     """
-    Advance a sensor's state by one tick. Called every PUBLISH_INTERVAL seconds.
-    Mutates `state` in place.
+    Advance a sensor's state by one tick. Called every PUBLISH_INTERVAL
+    seconds. Mutates `state` in place.
     """
-    # ── Anomaly trigger ──
-    if state.anomaly_ticks_left == 0 and random.random() < ANOMALY_PROBABILITY:
-        state.anomaly_ticks_left = random.randint(2, 6)
-        state.anomaly_factor = random.uniform(1.5, 2.5)
-        logger.info(
-            f"⚡ Anomaly on {state.sensor_id}: ×{state.anomaly_factor:.2f} "
-            f"for {state.anomaly_ticks_left} ticks"
-        )
+    # 1. Maybe start a new typed anomaly event.
+    maybe_start_anomaly(state)
 
-    targets = compute_targets(state.profile, ts)
+    # 2. Compute time-of-day targets.
+    targets = compute_targets(state.profile, ts, state.is_hotspot)
 
-    # Apply anomaly to traffic-correlated pollutants only.
-    if state.anomaly_ticks_left > 0:
-        targets['co2']   *= state.anomaly_factor
-        targets['noise'] *= state.anomaly_factor
-        targets['pm25']  *= state.anomaly_factor
-        state.anomaly_ticks_left -= 1
+    # 3. Apply active anomaly (if any) and tick its countdown.
+    if state.active_anomaly is not None:
+        targets = apply_anomaly(targets, state.active_anomaly, state.co2)
+        state.active_anomaly.ticks_left -= 1
+        if state.active_anomaly.ticks_left <= 0:
+            logger.info(
+                f"✓ {state.active_anomaly.spec.name} cleared on {state.sensor_id}"
+            )
+            state.active_anomaly = None
 
-    # ── EWMA smoothing + small Gaussian sensor noise ──
+    # 4. EWMA smoothing + small Gaussian sensor noise.
     α = EWMA_ALPHA
     state.co2         = α * state.co2         + (1 - α) * targets['co2']   + random.gauss(0, 5.0)
     state.noise       = α * state.noise       + (1 - α) * targets['noise'] + random.gauss(0, 1.0)
@@ -226,15 +428,17 @@ def step_state(state: SensorState, ts: datetime) -> None:
     state.pm25        = α * state.pm25        + (1 - α) * targets['pm25']  + random.gauss(0, 1.0)
     state.humidity    = α * state.humidity    + (1 - α) * targets['hum']   + random.gauss(0, 0.5)
 
-    # ── Boundary clamping (physical plausibility) ──
-    state.co2 = max(300.0, min(2500.0, state.co2))
-    state.noise = max(30.0, min(110.0, state.noise))
-    state.temperature = max(15.0, min(40.0, state.temperature))
-    state.pm25 = max(5.0, min(250.0, state.pm25))
-    state.humidity = max(30.0, min(98.0, state.humidity))
+    # 5. Boundary clamping (physical plausibility).
+    # Bounds widened so anomalies can drive metrics into the CRITICAL band
+    # without being capped at the threshold.
+    state.co2 = max(250.0, min(3000.0, state.co2))
+    state.noise = max(30.0, min(125.0, state.noise))
+    state.temperature = max(15.0, min(42.0, state.temperature))
+    state.pm25 = max(5.0, min(300.0, state.pm25))
+    state.humidity = max(20.0, min(99.0, state.humidity))
 
-    # ── Device health ──
-    # Battery slowly discharges (about 1% / 50 min at 5s tick); recharges
+    # 6. Device health.
+    # Battery slowly discharges (~1% / 50 min at 5s tick); recharges
     # randomly when low — mimics field devices being swapped out.
     state.battery = max(0.0, state.battery - random.uniform(0.0, 0.005))
     if state.battery < 30 and random.random() < 0.05:
@@ -281,7 +485,14 @@ class SensorSimulator:
                 sensor_id=sid,
                 location_id=location_id,
                 profile=profile,
+                is_hotspot=(sid in HOTSPOT_SENSORS),
             )
+
+        n_hot = sum(1 for s in self.states.values() if s.is_hotspot)
+        logger.info(
+            f"Initialised {len(self.states)} sensors ({n_hot} hotspots): "
+            f"{sorted(s.sensor_id for s in self.states.values() if s.is_hotspot)}"
+        )
 
     # ── Sensor → location resolution ──────────────────────────────────────
     def _initialize_sensor_locations(self) -> Dict[str, str]:
@@ -405,11 +616,15 @@ class SensorSimulator:
             result = self.client.publish(topic, payload, qos=1)
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
                 d = telemetry['data']
+                state = self.states[sensor_id]
+                anomaly_tag = ""
+                if state.active_anomaly is not None:
+                    anomaly_tag = f" 🚨{state.active_anomaly.spec.name}"
                 logger.info(
                     f"{sensor_id} ({telemetry['locationId']}): "
                     f"CO2={d['co2']:.0f} | PM2.5={d['pm25']:.1f} | "
                     f"Noise={d['noise']:.1f} | T={d['temperature']:.1f}°C | "
-                    f"H={d['humidity']:.0f}%"
+                    f"H={d['humidity']:.0f}%{anomaly_tag}"
                 )
             else:
                 logger.error(f"Publish failed rc={result.rc} on {topic}")
@@ -417,8 +632,10 @@ class SensorSimulator:
             logger.error(f"Publish error: {e}")
 
     def run(self):
-        logger.info(f"Starting simulator: {len(self.sensor_ids)} sensors, "
-                    f"interval={self.publish_interval}s, α={EWMA_ALPHA}")
+        logger.info(
+            f"Starting simulator: {len(self.sensor_ids)} sensors, "
+            f"interval={self.publish_interval}s, α={EWMA_ALPHA}, danger={DANGER_LEVEL}"
+        )
         try:
             while True:
                 for sensor_id in self.sensor_ids:

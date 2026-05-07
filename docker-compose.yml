@@ -141,6 +141,9 @@ services:
       MQTT_BROKER_PORT: ${MQTT_BROKER_PORT}
       SENSOR_LIST: ${SENSOR_LIST}
       PUBLISH_INTERVAL: ${PUBLISH_INTERVAL}
+      # Anomaly intensity: normal | elevated (default) | extreme
+      # See iot-simulator/simulator.py for ANOMALY_EVENTS catalog.
+      SIMULATOR_DANGER_LEVEL: ${SIMULATOR_DANGER_LEVEL:-elevated}
     depends_on:
       - mosquitto
     networks:

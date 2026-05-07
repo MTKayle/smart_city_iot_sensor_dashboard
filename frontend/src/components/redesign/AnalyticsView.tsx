@@ -960,18 +960,35 @@ const AnalyticsView: React.FC = () => {
       <div className="trend-grid">
         {METRICS.map((m) => {
           const points = trend?.data[m.key] ?? [];
-          const last = points.length > 0 ? points[points.length - 1].value : null;
-          const min = points.length > 0 ? Math.min(...points.map((p) => p.value)) : null;
-          const max = points.length > 0 ? Math.max(...points.map((p) => p.value)) : null;
+          const values = points.map((p) => p.value);
+          const last = values.length > 0 ? values[values.length - 1] : null;
+          const min = values.length > 0 ? Math.min(...values) : null;
+          const max = values.length > 0 ? Math.max(...values) : null;
+          const mean = values.length > 0 ? values.reduce((s, v) => s + v, 0) / values.length : null;
+          const periodLabel = TIME_RANGE_SPECS[timeRange].label;
           return (
             <div key={m.key} id={`trend-chart-${m.key}`} className="chart-card trend-card">
-              <div className="card-header">
-                <h3 className="card-title">{m.label}</h3>
-                <p className="card-subtitle">
-                  {last !== null
-                    ? `${TIME_RANGE_SPECS[timeRange].label}: ${last.toFixed(m.digits)} ${m.unit} · min ${min!.toFixed(m.digits)} · max ${max!.toFixed(m.digits)}`
-                    : 'Không có dữ liệu'}
-                </p>
+              <div className="card-header trend-card-header">
+                <div className="trend-card-header-text">
+                  <h3 className="card-title">{m.label}</h3>
+                  <p className="card-subtitle">
+                    {last !== null
+                      ? `Mới nhất: ${last.toFixed(m.digits)} ${m.unit} · min ${min!.toFixed(m.digits)} · max ${max!.toFixed(m.digits)}`
+                      : 'Không có dữ liệu'}
+                  </p>
+                </div>
+                {mean !== null && (
+                  <div
+                    className="trend-period-avg"
+                    style={{ color: m.color, borderColor: `${m.color}66`, background: `${m.color}14` }}
+                    title={`Trung bình ${values.length} điểm trong ${periodLabel.toLowerCase()}`}
+                  >
+                    <span className="trend-period-avg-label">Ø {periodLabel}</span>
+                    <span className="trend-period-avg-value">
+                      {mean.toFixed(m.digits)} <span className="trend-period-avg-unit">{m.unit}</span>
+                    </span>
+                  </div>
+                )}
               </div>
               <ResponsiveContainer width="100%" height={200}>
                 <LineChart data={points} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>

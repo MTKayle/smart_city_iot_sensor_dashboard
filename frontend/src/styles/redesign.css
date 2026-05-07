@@ -2083,6 +2083,62 @@ body {
   }
 }
 
+/* ─── Period-average badge (top-right of each trend card) ─── */
+.trend-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+}
+
+.trend-card-header-text {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.trend-period-avg {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 12px;
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.trend-period-avg-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.trend-period-avg-value {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-period-avg-unit {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.75;
+  margin-left: 2px;
+}
+
+@media (max-width: 600px) {
+  .trend-period-avg {
+    padding: 4px 8px;
+  }
+  .trend-period-avg-value {
+    font-size: 14px;
+  }
+}
+
 /* ─── Toolbar (actions) ─── */
 .analytics-toolbar {
   display: flex;
